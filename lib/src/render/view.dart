@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/rendering.dart' show SelectedContent;
+import 'package:flutter/rendering.dart' show SelectedContent, SelectionStatus;
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:html/dom.dart' as html_dom;
 import 'package:html/parser.dart' as html_parser;
 import 'dart:async';
@@ -68,6 +70,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
+    VoidCallback? onSequenceSettled,
     double tokenAnimationDurationFactor = 0,
     Duration? tokenAnimationDuration,
     Curve tokenAnimationCurve = Curves.easeOut,
@@ -75,10 +78,14 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     super.tokenAnimationPaused = false,
     super.tokenCompaction = AnimatedMarkdownTokenCompaction.automatic,
     bool showTokenDebugColors = false,
+    bool showCodeBlockCopyButton = false,
     bool enableSelection = false,
     StreamingMarkdownThemeData theme = const StreamingMarkdownThemeData(),
     AnimatedMarkdownBlockBuilder? blockBuilder,
-    super.onLinkTap,
+    AnimatedMarkdownImageBuilder? imageBuilder,
+    AnimatedMarkdownLatexBuilder? latexBuilder,
+    PlaceholderAlignment inlineImageAlignment = PlaceholderAlignment.baseline,
+    ValueChanged<String>? onLinkTap,
   }) : super(
           nodes: blocks,
           emptyPlaceholder: placeholder,
@@ -87,13 +94,19 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
           tokenArrivalDelay: tokenStaggerDelay,
           onTokenArrivalWait: onTokenDelay,
           onTokenFadeInEnd: onTokenAnimationEnd,
+          onSequenceSettled: onSequenceSettled,
           tokenFadeInRelativeToDelay: tokenAnimationDurationFactor,
           tokenFadeInDuration: tokenAnimationDuration,
           tokenFadeInCurve: tokenAnimationCurve,
           debugTokenHighlight: showTokenDebugColors,
+          showCodeBlockCopyButton: showCodeBlockCopyButton,
           enableTextSelection: enableSelection,
           markdownTheme: theme,
           customBlockBuilder: blockBuilder,
+          customImageBuilder: imageBuilder,
+          customLatexBuilder: latexBuilder,
+          inlineImageAlignment: inlineImageAlignment,
+          onLinkTap: onLinkTap,
         );
 
   /// Creates a renderer by parsing a complete markdown string synchronously.
@@ -116,6 +129,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
+    VoidCallback? onSequenceSettled,
     double tokenAnimationDurationFactor = 0,
     Duration? tokenAnimationDuration,
     Curve tokenAnimationCurve = Curves.easeOut,
@@ -124,9 +138,13 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     AnimatedMarkdownTokenCompaction tokenCompaction =
         AnimatedMarkdownTokenCompaction.automatic,
     bool showTokenDebugColors = false,
+    bool showCodeBlockCopyButton = false,
     bool enableSelection = false,
     StreamingMarkdownThemeData theme = const StreamingMarkdownThemeData(),
     AnimatedMarkdownBlockBuilder? blockBuilder,
+    AnimatedMarkdownImageBuilder? imageBuilder,
+    AnimatedMarkdownLatexBuilder? latexBuilder,
+    PlaceholderAlignment inlineImageAlignment = PlaceholderAlignment.baseline,
     ValueChanged<String>? onLinkTap,
   }) {
     final MarkdownParseResult result = MarkdownSyncParser.parseMarkdown(
@@ -143,6 +161,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
       tokenStaggerDelay: tokenStaggerDelay,
       onTokenDelay: onTokenDelay,
       onTokenAnimationEnd: onTokenAnimationEnd,
+      onSequenceSettled: onSequenceSettled,
       tokenAnimationDurationFactor: tokenAnimationDurationFactor,
       tokenAnimationDuration: tokenAnimationDuration,
       tokenAnimationCurve: tokenAnimationCurve,
@@ -150,9 +169,13 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
       tokenAnimationPaused: tokenAnimationPaused,
       tokenCompaction: tokenCompaction,
       showTokenDebugColors: showTokenDebugColors,
+      showCodeBlockCopyButton: showCodeBlockCopyButton,
       enableSelection: enableSelection,
       theme: theme,
       blockBuilder: blockBuilder,
+      imageBuilder: imageBuilder,
+      latexBuilder: latexBuilder,
+      inlineImageAlignment: inlineImageAlignment,
       onLinkTap: onLinkTap,
     );
   }
@@ -185,6 +208,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     this.tokenArrivalDelay = Duration.zero,
     this.onTokenArrivalWait,
     this.onTokenFadeInEnd,
+    this.onSequenceSettled,
     this.tokenFadeInRelativeToDelay = 0,
     this.tokenFadeInDuration,
     this.tokenFadeInCurve = Curves.easeOut,
@@ -192,9 +216,13 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     this.tokenAnimationPaused = false,
     this.tokenCompaction = AnimatedMarkdownTokenCompaction.automatic,
     this.debugTokenHighlight = false,
+    this.showCodeBlockCopyButton = false,
     this.enableTextSelection = false,
     this.markdownTheme = const StreamingMarkdownThemeData(),
     this.customBlockBuilder,
+    this.customImageBuilder,
+    this.customLatexBuilder,
+    this.inlineImageAlignment = PlaceholderAlignment.baseline,
     this.onLinkTap,
   });
 
@@ -223,6 +251,9 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// Called when a token fade animation completes.
   final VoidCallback? onTokenFadeInEnd;
 
+  /// Called when all markdown blocks have become visible in sequence.
+  final VoidCallback? onSequenceSettled;
+
   /// Computes fade duration as a multiple of [tokenArrivalDelay] when
   /// [tokenFadeInDuration] is not provided.
   final double tokenFadeInRelativeToDelay;
@@ -245,6 +276,9 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// Paints token debug backgrounds to inspect token boundaries.
   final bool debugTokenHighlight;
 
+  /// Shows a copy button in fenced and indented code block headers.
+  final bool showCodeBlockCopyButton;
+
   /// Enables selectable text and markdown-aware copy behavior.
   final bool enableTextSelection;
 
@@ -253,6 +287,15 @@ class StreamingMarkdownRenderView extends StatelessWidget {
 
   /// Optional block override hook.
   final StreamingMarkdownBlockBuilder? customBlockBuilder;
+
+  /// Optional image override hook.
+  final StreamingMarkdownImageBuilder? customImageBuilder;
+
+  /// Optional LaTeX/math override hook.
+  final StreamingMarkdownLatexBuilder? customLatexBuilder;
+
+  /// Alignment used for inline markdown image widget spans.
+  final PlaceholderAlignment inlineImageAlignment;
 
   /// Link tap callback. Defaults to no-op when omitted.
   final ValueChanged<String>? onLinkTap;
@@ -326,8 +369,10 @@ class StreamingMarkdownRenderView extends StatelessWidget {
       padding: padding,
       blockSpacing: markdownTheme.blockSpacing,
       tokenArrivalDelay: tokenArrivalDelay,
+      tokenFadeDuration: _resolvedTokenFadeInDuration(),
       paused: tokenAnimationPaused,
       onWait: onTokenArrivalWait,
+      onSequenceSettled: onSequenceSettled,
       blockIdentityBuilder: _blockIdentity,
       blockBuilder: (BuildContext context, MarkdownRenderNode block) {
         return _BlockRenderHost(

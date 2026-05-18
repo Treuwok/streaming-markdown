@@ -199,11 +199,19 @@ class _FadeInTokenHostState extends State<_FadeInTokenHost> {
 
   @override
   Widget build(BuildContext context) {
+    final bool reserveLayout = _TokenReserveLayoutScope.isEnabled(context);
     if (widget.duration <= Duration.zero) {
       return widget.child;
     }
     if (!_revealed) {
-      return const Offstage(offstage: true);
+      if (!reserveLayout) {
+        return const Offstage(offstage: true);
+      }
+      return ExcludeSemantics(
+        child: IgnorePointer(
+          child: Opacity(opacity: 0, child: widget.child),
+        ),
+      );
     }
     if (_animationCompleted || _animationDuration <= Duration.zero) {
       return widget.child;

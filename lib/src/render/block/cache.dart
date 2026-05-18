@@ -6,11 +6,23 @@ extension _StreamingMarkdownBlockCache on StreamingMarkdownRenderView {
   }
 
   String _tableSnapshotKey(MarkdownRenderNode node) {
-    return '${node.startByte}:${node.startRow}:${node.depth}';
+    return '${node.startByte}:${node.startRow}:${node.depth}:'
+        '${_tableSnapshotHeaderKey(node)}';
+  }
+
+  String _tableSnapshotHeaderKey(MarkdownRenderNode node) {
+    for (final String line in node.raw.replaceAll('\r', '').split('\n')) {
+      final String trimmed = line.trim();
+      if (trimmed.isEmpty || !trimmed.contains('|')) {
+        continue;
+      }
+      return trimmed;
+    }
+    return node.type;
   }
 
   void _rememberTableSnapshot(MarkdownRenderNode node, _ParsedTable table) {
-    if (!_tableHasContent(table)) {
+    if (!_tableHasContent(table) || !_tableHasBalancedLatex(table)) {
       return;
     }
     final String key = _tableSnapshotKey(node);
@@ -43,6 +55,42 @@ extension _StreamingMarkdownBlockCache on StreamingMarkdownRenderView {
       }
     }
     return false;
+  }
+
+  bool _tableHasBalancedLatex(_ParsedTable table) {
+    for (final String cell in table.headers) {
+      if (!_cellHasBalancedLatex(cell)) {
+        return false;
+      }
+    }
+    for (final List<String> row in table.rows) {
+      for (final String cell in row) {
+        if (!_cellHasBalancedLatex(cell)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  bool _cellHasBalancedLatex(String cell) {
+    int dollarCount = 0;
+    for (int i = 0; i < cell.length; i++) {
+      if (cell.codeUnitAt(i) == 36 && !_isEscaped(cell, i)) {
+        dollarCount += 1;
+      }
+    }
+    return dollarCount.isEven &&
+        cell.split(r'\(').length == cell.split(r'\)').length &&
+        cell.split(r'\[').length == cell.split(r'\]').length;
+  }
+
+  bool _isEscaped(String value, int index) {
+    int slashCount = 0;
+    for (int i = index - 1; i >= 0 && value.codeUnitAt(i) == 92; i--) {
+      slashCount += 1;
+    }
+    return slashCount.isOdd;
   }
 
   String _blockSignature(
@@ -85,6 +133,12 @@ extension _StreamingMarkdownBlockCache on StreamingMarkdownRenderView {
       ..write(markdownTheme.hashCode)
       ..write(':')
       ..write(customBlockBuilder.hashCode)
+      ..write(':')
+      ..write(customImageBuilder.hashCode)
+      ..write(':')
+      ..write(customLatexBuilder.hashCode)
+      ..write(':')
+      ..write(inlineImageAlignment)
       ..write(':')
       ..write(onLinkTap.hashCode)
       ..write(':')

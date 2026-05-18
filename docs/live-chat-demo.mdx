@@ -1,0 +1,54 @@
+---
+title: Live Chat Demo
+description: Try the static Flutter web chatbot demo embedded in the docs.
+---
+
+# Live Chat Demo
+
+The embedded demo is the same Flutter example app from `example/lib/main.dart`,
+built as a static web app and served from the documentation site.
+
+This page is refreshed for the `0.3.4` release so the docs demo matches the
+current shipped example, including web parser support, chat provider controls,
+LaTeX rendering, and the latest streaming table behavior.
+
+It can connect to:
+
+- local Ollama through `http://localhost:11434`
+- OpenAI / ChatGPT compatible streaming APIs
+- Anthropic Claude Messages streaming
+- Gemini `streamGenerateContent`
+- xAI Grok through the OpenAI-compatible chat completions API
+
+<video
+  className="chat-demo-video"
+  src="/img/preview/chat-demo.mp4"
+  poster="/img/preview/chat-demo-screenshot.png"
+  controls
+  muted
+  playsInline
+/>
+
+<iframe
+  className="chat-demo-frame"
+  title="animated_streaming_markdown chatbot demo"
+  src="/demo/chat/"
+/>
+
+## Local Ollama
+
+Run Ollama locally, pull a model, then use the default provider in the demo:
+
+```sh
+ollama serve
+ollama pull llama3.2
+```
+
+The demo sends requests to `/api/chat` and renders streamed Markdown responses
+with `AnimatedStreamingMarkdown`.
+
+## Cloud Providers
+
+Pick a provider from the dropdown, enter a model and API key, and send a
+message. API keys entered in the demo stay in the browser session. The docs
+build does not bundle `.env` secrets.

@@ -12,12 +12,14 @@ extension _SequencedBlockTokenCounting on _SequencedBlockListState {
     if (node.type == 'fenced_code_block' ||
         node.type == 'indented_code_block') {
       // Avoid long pauses after big code blocks.
-      return widget.tokenArrivalDelay * 8;
+      return widget.tokenArrivalDelay * 8 + widget.tokenFadeDuration;
     }
     if (tokens <= 1) {
-      return widget.tokenArrivalDelay;
+      return widget.tokenFadeDuration > widget.tokenArrivalDelay
+          ? widget.tokenFadeDuration
+          : widget.tokenArrivalDelay;
     }
-    return widget.tokenArrivalDelay * tokens;
+    return widget.tokenArrivalDelay * (tokens - 1) + widget.tokenFadeDuration;
   }
 
   int _tokenCountForNode(MarkdownRenderNode node) {

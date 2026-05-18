@@ -921,6 +921,7 @@ class _MarkdownPreviewSurfaceState extends State<_MarkdownPreviewSurface> {
                           tokenAnimationBuilder: widget.tokenAnimationBuilder,
                           tokenAnimationPaused: widget.renderPaused,
                           showTokenDebugColors: widget.debugTokens,
+                          showCodeBlockCopyButton: true,
                           tokenCompaction: widget.debugTokens
                               ? AnimatedMarkdownTokenCompaction.always
                               : AnimatedMarkdownTokenCompaction.automatic,

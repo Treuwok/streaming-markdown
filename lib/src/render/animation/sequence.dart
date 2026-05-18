@@ -14,10 +14,12 @@ class _SequencedBlockList extends StatefulWidget {
     required this.padding,
     required this.blockSpacing,
     required this.tokenArrivalDelay,
+    required this.tokenFadeDuration,
     required this.paused,
     required this.blockIdentityBuilder,
     required this.blockBuilder,
     this.onWait,
+    this.onSequenceSettled,
   });
 
   final List<MarkdownRenderNode> blocks;
@@ -25,8 +27,10 @@ class _SequencedBlockList extends StatefulWidget {
   final EdgeInsetsGeometry padding;
   final double blockSpacing;
   final Duration tokenArrivalDelay;
+  final Duration tokenFadeDuration;
   final bool paused;
   final VoidCallback? onWait;
+  final VoidCallback? onSequenceSettled;
   final String Function(MarkdownRenderNode node) blockIdentityBuilder;
   final Widget Function(BuildContext context, MarkdownRenderNode node)
       blockBuilder;

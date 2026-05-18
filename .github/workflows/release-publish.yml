@@ -26,11 +26,17 @@ jobs:
       - name: Install package dependencies
         run: flutter pub get
 
+      - name: Verify committed WASM parser assets
+        run: tool/verify_wasm_assets.sh
+
       - name: Analyze package
         run: dart analyze lib test
 
       - name: Run render tests
-        run: flutter test test/render/streaming_markdown_test.dart
+        run: flutter test
+
+      - name: Validate package
+        run: flutter pub publish --dry-run
 
   release:
     name: Create GitHub release

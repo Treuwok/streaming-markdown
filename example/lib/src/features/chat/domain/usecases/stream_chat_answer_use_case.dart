@@ -1,3 +1,4 @@
+import '../models/chat_connection_settings.dart';
 import '../repositories/chat_repository.dart';
 
 final class StreamChatAnswerUseCase {
@@ -5,8 +6,8 @@ final class StreamChatAnswerUseCase {
 
   final ChatRepository _repository;
 
-  Stream<String> call(String question) {
-    return _repository.streamAnswer(question);
+  Stream<String> call(ChatCompletionRequest request) {
+    return _repository.streamAnswer(request);
   }
 
   void dispose() {

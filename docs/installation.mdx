@@ -9,7 +9,7 @@ Add the package to your Flutter app:
 
 ```yaml
 dependencies:
-  animated_streaming_markdown: ^0.3.3
+  animated_streaming_markdown: ^0.3.4
 ```
 
 Install dependencies:
@@ -27,11 +27,37 @@ import 'package:animated_streaming_markdown/animated_streaming_markdown.dart';
 ## Requirements
 
 - Flutter `>=3.0.0`
-- Dart SDK `>=2.17.0 <4.0.0`
+- Dart SDK `>=3.0.0 <4.0.0`
 - Native build toolchain for your target platform
 
 Because the package includes native parser integration, app targets need the
 usual platform build setup for Android, iOS, macOS, Linux, or Windows.
+
+## Web WASM Parser
+
+Flutter web is supported. Published package versions include the generated
+Tree-sitter WASM parser asset and bundle it through Flutter package assets
+automatically. App developers do not need to copy files, edit `web/index.html`,
+or add build scripts.
+
+The package CI verifies that published WASM assets are up to date with the
+vendored Tree-sitter sources.
+
+Then warm the parser before the first visible render:
+
+```dart
+await warmUpStreamingMarkdownParser();
+```
+
+Emscripten is only needed by package maintainers when rebuilding the committed
+WASM parser assets before publishing.
+
+## LaTeX / KaTeX Math
+
+LaTeX math rendering is included through `flutter_math_fork`, a pure
+Dart/Flutter renderer with a Dart port of the KaTeX parser. Inline `$...$` and
+`\(...\)` math and display `$$...$$` and `\[...\]` math work without extra app
+setup.
 
 ## Links
 

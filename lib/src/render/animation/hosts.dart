@@ -240,6 +240,27 @@ class _TokenCompactionScope extends InheritedWidget {
   }
 }
 
+class _TokenReserveLayoutScope extends InheritedWidget {
+  const _TokenReserveLayoutScope({
+    required this.enabled,
+    required super.child,
+  });
+
+  final bool enabled;
+
+  static bool isEnabled(BuildContext context) {
+    return context
+            .dependOnInheritedWidgetOfExactType<_TokenReserveLayoutScope>()
+            ?.enabled ??
+        false;
+  }
+
+  @override
+  bool updateShouldNotify(_TokenReserveLayoutScope oldWidget) {
+    return oldWidget.enabled != enabled;
+  }
+}
+
 class _TokenLayoutGate extends StatefulWidget {
   const _TokenLayoutGate({
     this.initialDelay = Duration.zero,

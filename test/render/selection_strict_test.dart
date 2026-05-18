@@ -439,7 +439,7 @@ void main() {
 
       expect(find.byType(SelectionArea), findsOneWidget);
       expect(find.byType(SelectableRegion), findsOneWidget);
-      expect(find.textContaining('Prefix'), findsOneWidget);
+      expect(_richTextPlainTexts(tester), contains('Prefix bold suffix'));
     });
 
     testWidgets('pixel parity smoke: same render size with/without selection', (
@@ -543,6 +543,59 @@ void main() {
       await expectLater(
         find.byKey(const ValueKey<String>('golden-root-enabled')),
         matchesGoldenFile('goldens/selection_enabled.png'),
+      );
+    });
+
+    testWidgets('selection overlay matches inline markdown rendering',
+        (WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(640, 240));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+        _node(
+            'paragraph',
+            'Inline [link](https://example.com), _italic_, '
+                '**bold**, ~~strike~~, and `code`.',
+            startByte: 0),
+        _node('paragraph',
+            'Reference [docs][repo] and underscore_like_words stay clean.',
+            startByte: 76),
+        _node('link_reference_definition',
+            '[repo]: https://github.com/samnn152/streaming-markdown',
+            startByte: 139),
+      ];
+
+      Future<void> pumpFrame(bool enableSelection) async {
+        await tester.pumpWidget(
+          _testApp(
+            RepaintBoundary(
+              key: const ValueKey<String>('golden-selection-parity'),
+              child: Scaffold(
+                body: StreamingMarkdownRenderView(
+                  nodes: nodes,
+                  padding: const EdgeInsets.all(16),
+                  enableTextSelection: enableSelection,
+                  tokenFadeInDuration: Duration.zero,
+                  tokenCompaction: AnimatedMarkdownTokenCompaction.disabled,
+                  markdownTheme: _goldenMarkdownTheme,
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      await pumpFrame(false);
+      await expectLater(
+        find.byKey(const ValueKey<String>('golden-selection-parity')),
+        matchesGoldenFile('goldens/selection_inline_disabled.png'),
+      );
+
+      await pumpFrame(true);
+      await expectLater(
+        find.byKey(const ValueKey<String>('golden-selection-parity')),
+        matchesGoldenFile('goldens/selection_inline_enabled.png'),
       );
     });
 
@@ -855,6 +908,13 @@ List<String> _renderSignatures(List<MarkdownRenderNode> nodes) {
   return nodes.map((MarkdownRenderNode node) {
     return '${node.type}:${node.raw.trimRight()}';
   }).toList(growable: false);
+}
+
+List<String> _richTextPlainTexts(WidgetTester tester) {
+  return tester
+      .widgetList<RichText>(find.byType(RichText))
+      .map((RichText widget) => widget.text.toPlainText())
+      .toList(growable: false);
 }
 
 MarkdownRenderNode _node(

@@ -1,12 +1,36 @@
+import 'dart:io';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:animated_streaming_markdown/animated_streaming_markdown.dart';
 
 void main() {
   test('library name is stable', () {
     expect(streamingMarkdownLibraryName, 'animated_streaming_markdown');
+  });
+
+  test('native parser availability can be required by release CI', () {
+    final bool requireNative =
+        Platform.environment['REQUIRE_STREAMING_MARKDOWN_NATIVE'] == 'true';
+    if (!requireNative && !isStreamingMarkdownNativeLibraryAvailable) {
+      return;
+    }
+
+    expect(isStreamingMarkdownNativeLibraryAvailable, isTrue);
+    final MarkdownParseResult result = MarkdownSyncParser.parseMarkdown(
+      '# Native check\n\n```dart\nprint(1);\n```',
+      backend: MarkdownSyncParserBackend.native,
+    );
+
+    expect(result.nativeAvailable, isTrue);
+    expect(result.blocks.map((MarkdownRenderNode node) => node.type), <String>[
+      'atx_heading',
+      'paragraph',
+      'fenced_code_block',
+    ]);
   });
 
   test('rope string append, random access and substring', () {
@@ -276,6 +300,47 @@ Setext title
     expect(watch.elapsedMilliseconds, lessThan(500));
   });
 
+  testWidgets('code block copy button copies code text when enabled', (
+    WidgetTester tester,
+  ) async {
+    String? clipboardText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        if (methodCall.method == 'Clipboard.setData') {
+          final Map<dynamic, dynamic> data =
+              methodCall.arguments! as Map<dynamic, dynamic>;
+          clipboardText = data['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedStreamingMarkdown.fromMarkdown(
+            markdown: '```dart\nfinal answer = 42;\n```',
+            tokenStaggerDelay: Duration.zero,
+            tokenAnimationDuration: Duration.zero,
+            showCodeBlockCopyButton: true,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('Copy code'));
+    await tester.pump();
+
+    expect(clipboardText, 'final answer = 42;');
+  });
+
   testWidgets('rendered links are tappable with text selection enabled', (
     WidgetTester tester,
   ) async {
@@ -312,6 +377,228 @@ Setext title
     recognizer?.onTap?.call();
 
     expect(tappedUrl, 'https://openai.com');
+  });
+
+  testWidgets('selection-enabled inline text avoids token widget layout drift',
+      (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 360,
+            child: StreamingMarkdownRenderView(
+              nodes: <MarkdownRenderNode>[
+                _renderNode(
+                  'Inline links render as tappable spans: '
+                  '[OpenAI](https://openai.com).',
+                ),
+                _renderNode(
+                  'Autolinks render from angle brackets: '
+                  '<https://github.com>.',
+                  startByte: 76,
+                  startRow: 2,
+                ),
+              ],
+              padding: EdgeInsets.zero,
+              enableTextSelection: true,
+              tokenFadeInDuration: const Duration(milliseconds: 200),
+              tokenArrivalDelay: const Duration(milliseconds: 20),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final RichText visibleText = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .firstWhere((RichText widget) =>
+            widget.text.toPlainText().contains('Inline links render'));
+    expect(_widgetSpanCount(visibleText.text), 0);
+    expect(visibleText.text.toPlainText(), contains('OpenAI'));
+  });
+
+  testWidgets('selection-enabled inline text still fades in', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StreamingMarkdownRenderView(
+            nodes: <MarkdownRenderNode>[
+              _renderNode('Inline [OpenAI](https://openai.com) link.'),
+            ],
+            padding: EdgeInsets.zero,
+            enableTextSelection: true,
+            tokenArrivalDelay: Duration.zero,
+            tokenFadeInDuration: const Duration(milliseconds: 200),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(_activeTokenOpacity(tester), greaterThan(0));
+    expect(_activeTokenOpacity(tester), lessThan(1));
+    final RichText visibleText = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .firstWhere((RichText widget) =>
+            widget.text.toPlainText().contains('Inline OpenAI link.'));
+    expect(_widgetSpanCount(visibleText.text), 0);
+  });
+
+  testWidgets('selection-enabled inline text keeps custom token animation idle',
+      (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StreamingMarkdownRenderView(
+            nodes: <MarkdownRenderNode>[
+              _renderNode('one two three'),
+            ],
+            padding: EdgeInsets.zero,
+            enableTextSelection: true,
+            tokenArrivalDelay: const Duration(milliseconds: 100),
+            tokenFadeInDuration: const Duration(milliseconds: 200),
+            tokenAnimationBuilder: (
+              BuildContext context,
+              StreamingMarkdownAnimatedToken token,
+            ) {
+              return KeyedSubtree(
+                key: const ValueKey<String>('selection-custom-token'),
+                child: Opacity(opacity: token.value, child: token.child),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(
+      find.byKey(const ValueKey<String>('selection-custom-token')),
+      findsAtLeastNWidgets(1),
+    );
+  });
+
+  testWidgets('inline markdown images use image builder, not marker text', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StreamingMarkdownRenderView(
+            nodes: <MarkdownRenderNode>[
+              _renderNode(
+                'before ![small marker](https://example.com/marker.png) after.',
+              ),
+            ],
+            padding: EdgeInsets.zero,
+            tokenFadeInDuration: Duration.zero,
+            customImageBuilder: (
+              BuildContext context,
+              StreamingMarkdownImageBuildContext image,
+            ) {
+              return Text(
+                '${image.state.name}:${image.inline}:${image.altText}',
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('loading:true:small marker'), findsOneWidget);
+    expect(find.textContaining('image: small marker'), findsNothing);
+  });
+
+  testWidgets('default inline markdown images gate surrounding content', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StreamingMarkdownRenderView(
+            nodes: <MarkdownRenderNode>[
+              _renderNode(
+                'before ![small marker](https://example.com/marker.png) after.',
+              ),
+            ],
+            padding: EdgeInsets.zero,
+            tokenFadeInDuration: Duration.zero,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('before'), findsNothing);
+    expect(find.textContaining('after'), findsNothing);
+    expect(find.textContaining('image: small marker'), findsNothing);
+  });
+
+  testWidgets('inline image alignment is exposed through render API', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StreamingMarkdownRenderView(
+            nodes: <MarkdownRenderNode>[
+              _renderNode(
+                'before ![small marker](https://example.com/marker.png) after.',
+              ),
+            ],
+            padding: EdgeInsets.zero,
+            tokenFadeInDuration: Duration.zero,
+            inlineImageAlignment: PlaceholderAlignment.aboveBaseline,
+            customImageBuilder: (
+              BuildContext context,
+              StreamingMarkdownImageBuildContext image,
+            ) {
+              return const SizedBox(width: 8, height: 8);
+            },
+          ),
+        ),
+      ),
+    );
+
+    final WidgetSpan imageSpan = _allWidgetSpans(tester).firstWhere(
+        (WidgetSpan span) =>
+            span.alignment == PlaceholderAlignment.aboveBaseline);
+    expect(imageSpan.alignment, PlaceholderAlignment.aboveBaseline);
+    expect(imageSpan.baseline, TextBaseline.alphabetic);
+  });
+
+  testWidgets('indented code block renders as a distinct code block', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StreamingMarkdownRenderView(
+            nodes: <MarkdownRenderNode>[
+              _renderNode(
+                "    final value = 'Indented code block';",
+                type: 'indented_code_block',
+              ),
+            ],
+            padding: EdgeInsets.zero,
+            tokenFadeInDuration: Duration.zero,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('code'), findsAtLeastNWidgets(1));
+    final String plainText = _richTextPlainTexts(tester).join('\n');
+    expect(plainText, contains('final'));
+    expect(plainText, contains('value'));
+    expect(plainText, isNot(contains('    final')));
   });
 
   testWidgets('settled tokens compact to static spans without layout jump', (
@@ -1076,6 +1363,26 @@ class Greeter {
     expect(tappedUrl, 'https://dart.dev');
   });
 
+  testWidgets('inline and display LaTeX render through KaTeX math widgets',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedStreamingMarkdown.fromMarkdown(
+            markdown:
+                r'Inline $x^2 + y^2 = z^2$ works.' '\n\n' r'$$\frac{a}{b}$$',
+            tokenAnimationDuration: Duration.zero,
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+
+    expect(find.byType(Math), findsNWidgets(2));
+    expect(find.textContaining(r'$x^2 + y^2 = z^2$'), findsNothing);
+  });
+
   testWidgets('footnotes render as numbered references and definitions', (
     WidgetTester tester,
   ) async {
@@ -1448,8 +1755,6 @@ class Greeter {
   testWidgets('markdown tables keep pipes inside inline code cells', (
     WidgetTester tester,
   ) async {
-    String? tappedUrl;
-
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -1490,20 +1795,21 @@ class Greeter {
             padding: EdgeInsets.zero,
             tokenArrivalDelay: Duration.zero,
             tokenFadeInDuration: Duration.zero,
-            onLinkTap: (String url) {
-              tappedUrl = url;
-            },
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(Table), findsOneWidget);
-    final Table table = tester.widget<Table>(find.byType(Table));
-    expect(table.children, hasLength(4));
-    for (final TableRow row in table.children) {
-      expect(row.children, hasLength(3));
+    expect(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+      findsOneWidget,
+    );
+    for (int row = 0; row < 4; row++) {
+      expect(
+        find.byKey(ValueKey<String>('markdown_table_row_$row')),
+        findsOneWidget,
+      );
     }
 
     final List<String> plainTexts = _richTextPlainTexts(tester);
@@ -1521,11 +1827,182 @@ class Greeter {
           'Tappable cell content',
         ]));
     expect(plainTexts.where((String text) => text == 'a | b'), hasLength(2));
+  });
 
-    await tester.tap(find.text('docs'));
+  testWidgets('markdown tables render LaTeX cells with formula pipes', (
+    WidgetTester tester,
+  ) async {
+    const String markdown = r'''
+| Công thức | Laplace | Ghi chú |
+| --- | --- | --- |
+| Định nghĩa | $\mathcal{L}\{f(t)\}=\int_0^\infty e^{-st}f(t)\,dt \left|_{0}^{\infty}$ | inline |
+| Đạo hàm | $$\mathcal{L}\{f'(t)\}=sF(s)-f(0)$$ | display |
+''';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedStreamingMarkdown.fromMarkdown(
+            markdown: markdown,
+            tokenAnimationDuration: Duration.zero,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+      findsOneWidget,
+    );
+    for (int row = 0; row < 3; row++) {
+      expect(
+        find.byKey(ValueKey<String>('markdown_table_row_$row')),
+        findsOneWidget,
+      );
+    }
+    expect(find.byType(Math), findsNWidgets(2));
+    expect(find.textContaining(r'\left|'), findsNothing);
+  });
+
+  testWidgets('streamed response keeps LaTeX table stable while appending', (
+    WidgetTester tester,
+  ) async {
+    const String markdown = r'''
+Các công thức Laplace:
+
+| Tên | Công thức |
+| --- | --- |
+| Định nghĩa | $\mathcal{L}\{f(t)\}=\int_0^\infty e^{-st}f(t)\,dt \left|_{0}^{\infty}$ |
+| Đạo hàm | $\mathcal{L}\{f(t)\}=F(s)$ |
+''';
+    final ValueNotifier<List<MarkdownBlock>> blocks =
+        ValueNotifier<List<MarkdownBlock>>(const <MarkdownBlock>[]);
+
+    addTearDown(() {
+      blocks.dispose();
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ValueListenableBuilder<List<MarkdownBlock>>(
+            valueListenable: blocks,
+            builder: (BuildContext context, List<MarkdownBlock> value, _) {
+              return AnimatedStreamingMarkdown(
+                blocks: value,
+                tokenStaggerDelay: const Duration(milliseconds: 20),
+                tokenAnimationDuration: const Duration(milliseconds: 20),
+                allowIncompleteInlineSyntax: true,
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    final StringBuffer streamed = StringBuffer();
+    for (final String chunk in _chunkString(markdown, 18)) {
+      streamed.write(chunk);
+      final MarkdownParseResult result = MarkdownSyncParser.parseMarkdown(
+        streamed.toString(),
+      );
+      blocks.value = result.blocks;
+      await tester.pump(const Duration(milliseconds: 24));
+    }
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    expect(_richTextPlainTexts(tester).join('\n'), contains('Laplace'));
+    expect(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+      findsOneWidget,
+    );
+    for (int row = 0; row < 3; row++) {
+      expect(
+        find.byKey(ValueKey<String>('markdown_table_row_$row')),
+        findsOneWidget,
+      );
+    }
+    expect(find.byType(Math), findsWidgets);
+  });
+
+  testWidgets('table layout stays stable while cell tokens reveal', (
+    WidgetTester tester,
+  ) async {
+    const String markdown = '''
+| Name | Notes |
+| --- | --- |
+| Laplace | This row contains a much longer explanation that would normally stretch while tokens appear. |
+''';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedStreamingMarkdown.fromMarkdown(
+            markdown: markdown,
+            tokenStaggerDelay: const Duration(milliseconds: 60),
+            tokenAnimationDuration: const Duration(milliseconds: 120),
+          ),
+        ),
+      ),
+    );
+
     await tester.pump();
+    expect(find.byKey(const ValueKey<String>('markdown_table_frame')),
+        findsOneWidget);
+    final Size initialSize = tester.getSize(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+    );
 
-    expect(tappedUrl, 'https://docs.flutter.dev');
+    await tester.pump(const Duration(milliseconds: 240));
+    final Size midSize = tester.getSize(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+    );
+
+    await tester.pumpAndSettle();
+    final Size finalSize = tester.getSize(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+    );
+
+    expect(midSize, finalSize);
+    expect(initialSize.height, lessThan(finalSize.height));
+  });
+
+  testWidgets('markdown tables reveal body rows progressively', (
+    WidgetTester tester,
+  ) async {
+    const String markdown = '''
+| Name | Notes |
+| --- | --- |
+| Laplace | First visible row |
+| Fourier | Second row should wait |
+''';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedStreamingMarkdown.fromMarkdown(
+            markdown: markdown,
+            tokenStaggerDelay: const Duration(milliseconds: 90),
+            tokenAnimationDuration: const Duration(milliseconds: 60),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    expect(find.text('Name'), findsOneWidget);
+    expect(find.text('Notes'), findsOneWidget);
+    expect(find.text('Laplace'), findsNothing);
+    expect(find.text('Fourier'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 260));
+    expect(find.text('Laplace'), findsOneWidget);
+    expect(find.text('Fourier'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 260));
+    expect(find.text('Fourier'), findsOneWidget);
   });
 
   testWidgets('table delimiter rows do not render as text or add token wait', (
@@ -1572,9 +2049,13 @@ class Greeter {
     );
 
     expect(find.textContaining('---'), findsNothing);
-    expect(find.byType(Table), findsOneWidget);
     expect(
-      tester.getSize(find.byType(Table)).height,
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+      findsOneWidget,
+    );
+    expect(
+      tester.getSize(find.byKey(const ValueKey<String>('markdown_table_frame')))
+          .height,
       0,
     );
   });
@@ -1649,6 +2130,15 @@ List<String> _richTextPlainTexts(WidgetTester tester) {
       .toList(growable: false);
 }
 
+Iterable<String> _chunkString(String value, int chunkLength) sync* {
+  var index = 0;
+  while (index < value.length) {
+    final int end = (index + chunkLength).clamp(0, value.length);
+    yield value.substring(index, end);
+    index = end;
+  }
+}
+
 MarkdownRenderNode _renderNode(
   String raw, {
   String type = 'paragraph',
@@ -1706,6 +2196,16 @@ double _activeTokenOpacity(WidgetTester tester) {
     return activeFadeTransitions.first;
   }
 
+  final List<double> activeTextSpanOpacities = <double>[];
+  for (final RichText richText in tester.widgetList<RichText>(
+    find.byType(RichText),
+  )) {
+    activeTextSpanOpacities.addAll(_activeTextSpanOpacities(richText.text));
+  }
+  if (activeTextSpanOpacities.isNotEmpty) {
+    return activeTextSpanOpacities.first;
+  }
+
   final List<double> settledOpacities = tester
       .widgetList<Opacity>(find.byType(Opacity))
       .map((Opacity widget) => widget.opacity)
@@ -1716,6 +2216,23 @@ double _activeTokenOpacity(WidgetTester tester) {
   }
 
   return 0;
+}
+
+List<double> _activeTextSpanOpacities(InlineSpan span) {
+  final List<double> values = <double>[];
+  if (span is TextSpan) {
+    final Color? color = span.style?.color;
+    if (color != null) {
+      final double opacity = color.a;
+      if (opacity > 0 && opacity < 1) {
+        values.add(opacity);
+      }
+    }
+    for (final InlineSpan child in span.children ?? const <InlineSpan>[]) {
+      values.addAll(_activeTextSpanOpacities(child));
+    }
+  }
+  return values;
 }
 
 double _opacityByKey(WidgetTester tester, Key key) {
@@ -1744,6 +2261,29 @@ int _widgetSpanCount(InlineSpan span) {
     return total;
   }
   return 0;
+}
+
+List<WidgetSpan> _allWidgetSpans(WidgetTester tester) {
+  final List<WidgetSpan> spans = <WidgetSpan>[];
+  for (final RichText richText in tester.widgetList<RichText>(
+    find.byType(RichText),
+  )) {
+    spans.addAll(_widgetSpansIn(richText.text));
+  }
+  return spans;
+}
+
+List<WidgetSpan> _widgetSpansIn(InlineSpan span) {
+  if (span is WidgetSpan) {
+    return <WidgetSpan>[span];
+  }
+  final List<WidgetSpan> spans = <WidgetSpan>[];
+  if (span is TextSpan) {
+    for (final InlineSpan child in span.children ?? const <InlineSpan>[]) {
+      spans.addAll(_widgetSpansIn(child));
+    }
+  }
+  return spans;
 }
 
 Finder _footnoteLabel(String id) {

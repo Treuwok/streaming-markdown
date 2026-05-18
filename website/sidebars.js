@@ -11,6 +11,7 @@ const sidebars = {
         'index',
         'installation',
         'quick-start',
+        'live-chat-demo',
         'build-a-demo',
       ],
     },

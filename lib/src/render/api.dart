@@ -34,11 +34,110 @@ typedef StreamingMarkdownTokenAnimationBuilder = Widget Function(
   StreamingMarkdownAnimatedToken token,
 );
 
+/// Loading/rendering state for a markdown image.
+enum StreamingMarkdownImageState {
+  /// The image provider has not resolved dimensions yet.
+  loading,
+
+  /// The image loaded and [StreamingMarkdownImageBuildContext.intrinsicSize]
+  /// is available.
+  loaded,
+
+  /// Loading failed.
+  error,
+}
+
+/// Context passed to [StreamingMarkdownImageBuilder].
+class StreamingMarkdownImageBuildContext {
+  /// Creates an image build context.
+  const StreamingMarkdownImageBuildContext({
+    required this.url,
+    required this.altText,
+    required this.inline,
+    required this.state,
+    required this.defaultWidget,
+    required this.fallbackWidget,
+    this.intrinsicSize,
+    this.error,
+  });
+
+  /// Image URL from markdown source.
+  final String url;
+
+  /// Alt text from markdown source.
+  final String altText;
+
+  /// Whether this image is inside a paragraph instead of a standalone block.
+  final bool inline;
+
+  /// Current image loading state.
+  final StreamingMarkdownImageState state;
+
+  /// Intrinsic logical-pixel size after the image has loaded.
+  final Size? intrinsicSize;
+
+  /// Default widget for the current state.
+  final Widget defaultWidget;
+
+  /// Standard fallback widget used when loading fails.
+  final Widget fallbackWidget;
+
+  /// Loading error when [state] is [StreamingMarkdownImageState.error].
+  final Object? error;
+}
+
+/// Custom builder hook for markdown images.
+typedef StreamingMarkdownImageBuilder = Widget Function(
+  BuildContext context,
+  StreamingMarkdownImageBuildContext image,
+);
+
+/// Context passed to [StreamingMarkdownLatexBuilder].
+class StreamingMarkdownLatexBuildContext {
+  /// Creates a LaTeX build context.
+  const StreamingMarkdownLatexBuildContext({
+    required this.expression,
+    required this.sourceMarkdown,
+    required this.display,
+    required this.defaultWidget,
+    required this.fallbackWidget,
+  });
+
+  /// TeX expression without markdown delimiters.
+  final String expression;
+
+  /// Source markdown including delimiters such as `$...$` or `$$...$$`.
+  final String sourceMarkdown;
+
+  /// Whether the expression came from a display-style delimiter.
+  final bool display;
+
+  /// Default KaTeX-compatible Flutter math widget.
+  final Widget defaultWidget;
+
+  /// Plain-text fallback used when math rendering fails or is disabled by a
+  /// custom builder.
+  final Widget fallbackWidget;
+}
+
+/// Custom builder hook for LaTeX math rendered with the KaTeX-compatible
+/// `flutter_math_fork` engine.
+typedef StreamingMarkdownLatexBuilder = Widget Function(
+  BuildContext context,
+  StreamingMarkdownLatexBuildContext latex,
+);
+
 /// Preferred token animation builder name for [AnimatedStreamingMarkdown].
 typedef AnimatedMarkdownTokenBuilder = StreamingMarkdownTokenAnimationBuilder;
 
 /// Preferred block override builder name for [AnimatedStreamingMarkdown].
 typedef AnimatedMarkdownBlockBuilder = StreamingMarkdownBlockBuilder;
+
+/// Preferred image builder name for [AnimatedStreamingMarkdown].
+typedef AnimatedMarkdownImageBuilder = StreamingMarkdownImageBuilder;
+
+/// Preferred LaTeX builder name for [AnimatedStreamingMarkdown].
+typedef AnimatedMarkdownLatexBuilder = StreamingMarkdownLatexBuilder;
 
 /// Preferred public name for block override context.
 typedef AnimatedMarkdownBlockContext = StreamingMarkdownBlockBuildContext;
@@ -110,6 +209,9 @@ class StreamingMarkdownThemeData {
     this.thematicBreakColor,
     this.imageErrorBackgroundColor,
     this.imageErrorTextStyle,
+    this.inlineLatexTextStyle,
+    this.displayLatexTextStyle,
+    this.latexErrorTextStyle,
     this.selectionColor,
   });
 
@@ -184,6 +286,15 @@ class StreamingMarkdownThemeData {
 
   /// Text style used when an image fails to load.
   final TextStyle? imageErrorTextStyle;
+
+  /// Text style passed to inline KaTeX math expressions.
+  final TextStyle? inlineLatexTextStyle;
+
+  /// Text style passed to display KaTeX math expressions.
+  final TextStyle? displayLatexTextStyle;
+
+  /// Text style used when a LaTeX expression cannot be parsed.
+  final TextStyle? latexErrorTextStyle;
 
   /// Selection highlight color used by selectable inline overlays.
   final Color? selectionColor;
