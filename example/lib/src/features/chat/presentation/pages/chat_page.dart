@@ -948,6 +948,7 @@ class _AssistantMarkdownBubbleState extends State<_AssistantMarkdownBubble> {
   bool _syncing = false;
   int _generation = 0;
   bool _waitingFirstNodeDelay = false;
+  bool _sequenceSettled = false;
   DateTime? _lastRenderActivityAt;
   Timer? _settledTimer;
   String? _settledSignature;
@@ -973,6 +974,7 @@ class _AssistantMarkdownBubbleState extends State<_AssistantMarkdownBubble> {
         oldWidget.tokenAnimationBuilder != widget.tokenAnimationBuilder) {
       _cancelSettledTimer();
       _settledSignature = null;
+      _sequenceSettled = false;
       _schedulePump();
     }
   }
@@ -1044,6 +1046,7 @@ class _AssistantMarkdownBubbleState extends State<_AssistantMarkdownBubble> {
     _settledSignature = null;
     _pendingSegments.clear();
     _waitingFirstNodeDelay = false;
+    _sequenceSettled = false;
     _lastRenderActivityAt = null;
     _sourceMarkdown = '';
     _parsedMarkdown = '';
@@ -1061,6 +1064,7 @@ class _AssistantMarkdownBubbleState extends State<_AssistantMarkdownBubble> {
     _settledSignature = null;
     _pendingSegments.clear();
     _waitingFirstNodeDelay = false;
+    _sequenceSettled = false;
     _notifyRenderActivity();
     _sourceMarkdown = incoming;
     _parsedMarkdown = incoming;
@@ -1149,6 +1153,7 @@ class _AssistantMarkdownBubbleState extends State<_AssistantMarkdownBubble> {
         !widget.responseComplete ||
         _syncing ||
         _waitingFirstNodeDelay ||
+        !_sequenceSettled ||
         _pendingSegments.isNotEmpty ||
         _parsedMarkdown != widget.markdown) {
       return;
@@ -1170,6 +1175,7 @@ class _AssistantMarkdownBubbleState extends State<_AssistantMarkdownBubble> {
       if (!mounted ||
           _syncing ||
           _waitingFirstNodeDelay ||
+          !_sequenceSettled ||
           _pendingSegments.isNotEmpty ||
           _parsedMarkdown != widget.markdown ||
           !widget.responseComplete) {
@@ -1187,6 +1193,7 @@ class _AssistantMarkdownBubbleState extends State<_AssistantMarkdownBubble> {
       if (!mounted ||
           _syncing ||
           _waitingFirstNodeDelay ||
+          !_sequenceSettled ||
           _pendingSegments.isNotEmpty ||
           _parsedMarkdown != widget.markdown ||
           !widget.responseComplete) {
@@ -1252,6 +1259,10 @@ class _AssistantMarkdownBubbleState extends State<_AssistantMarkdownBubble> {
         tokenStaggerDelay: widget.tokenStaggerDelay,
         onTokenDelay: _notifyRenderActivity,
         onTokenAnimationEnd: _notifyRenderActivity,
+        onSequenceSettled: () {
+          _sequenceSettled = true;
+          _scheduleSettledNotification();
+        },
         tokenAnimationDuration: widget.tokenAnimationDuration,
         tokenAnimationCurve: widget.tokenAnimationCurve,
         tokenAnimationBuilder: widget.tokenAnimationBuilder,

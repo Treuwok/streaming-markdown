@@ -70,6 +70,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
+    VoidCallback? onSequenceSettled,
     double tokenAnimationDurationFactor = 0,
     Duration? tokenAnimationDuration,
     Curve tokenAnimationCurve = Curves.easeOut,
@@ -95,6 +96,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
           tokenArrivalDelay: tokenStaggerDelay,
           onTokenArrivalWait: onTokenDelay,
           onTokenFadeInEnd: onTokenAnimationEnd,
+          onSequenceSettled: onSequenceSettled,
           tokenFadeInRelativeToDelay: tokenAnimationDurationFactor,
           tokenFadeInDuration: tokenAnimationDuration,
           tokenFadeInCurve: tokenAnimationCurve,
@@ -132,6 +134,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
+    VoidCallback? onSequenceSettled,
     double tokenAnimationDurationFactor = 0,
     Duration? tokenAnimationDuration,
     Curve tokenAnimationCurve = Curves.easeOut,
@@ -163,6 +166,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
       tokenStaggerDelay: tokenStaggerDelay,
       onTokenDelay: onTokenDelay,
       onTokenAnimationEnd: onTokenAnimationEnd,
+      onSequenceSettled: onSequenceSettled,
       tokenAnimationDurationFactor: tokenAnimationDurationFactor,
       tokenAnimationDuration: tokenAnimationDuration,
       tokenAnimationCurve: tokenAnimationCurve,
@@ -209,6 +213,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     this.tokenArrivalDelay = Duration.zero,
     this.onTokenArrivalWait,
     this.onTokenFadeInEnd,
+    this.onSequenceSettled,
     this.tokenFadeInRelativeToDelay = 0,
     this.tokenFadeInDuration,
     this.tokenFadeInCurve = Curves.easeOut,
@@ -250,6 +255,9 @@ class StreamingMarkdownRenderView extends StatelessWidget {
 
   /// Called when a token fade animation completes.
   final VoidCallback? onTokenFadeInEnd;
+
+  /// Called when all markdown blocks have become visible in sequence.
+  final VoidCallback? onSequenceSettled;
 
   /// Computes fade duration as a multiple of [tokenArrivalDelay] when
   /// [tokenFadeInDuration] is not provided.
@@ -369,6 +377,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
       tokenFadeDuration: _resolvedTokenFadeInDuration(),
       paused: tokenAnimationPaused,
       onWait: onTokenArrivalWait,
+      onSequenceSettled: onSequenceSettled,
       blockIdentityBuilder: _blockIdentity,
       blockBuilder: (BuildContext context, MarkdownRenderNode block) {
         return _BlockRenderHost(

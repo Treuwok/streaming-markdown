@@ -240,18 +240,37 @@ class _TokenCompactionScope extends InheritedWidget {
   }
 }
 
+class _TokenReserveLayoutScope extends InheritedWidget {
+  const _TokenReserveLayoutScope({
+    required this.enabled,
+    required super.child,
+  });
+
+  final bool enabled;
+
+  static bool isEnabled(BuildContext context) {
+    return context
+            .dependOnInheritedWidgetOfExactType<_TokenReserveLayoutScope>()
+            ?.enabled ??
+        false;
+  }
+
+  @override
+  bool updateShouldNotify(_TokenReserveLayoutScope oldWidget) {
+    return oldWidget.enabled != enabled;
+  }
+}
+
 class _TokenLayoutGate extends StatefulWidget {
   const _TokenLayoutGate({
     this.initialDelay = Duration.zero,
     this.scheduledStart,
     required this.child,
-    this.maintainSize = false,
   });
 
   final Duration initialDelay;
   final DateTime? scheduledStart;
   final Widget child;
-  final bool maintainSize;
 
   @override
   State<_TokenLayoutGate> createState() => _TokenLayoutGateState();
@@ -396,15 +415,6 @@ class _TokenLayoutGateState extends State<_TokenLayoutGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.maintainSize) {
-      return Visibility(
-        visible: _visible,
-        maintainSize: true,
-        maintainAnimation: true,
-        maintainState: true,
-        child: widget.child,
-      );
-    }
     if (!_visible) {
       return const SizedBox.shrink();
     }

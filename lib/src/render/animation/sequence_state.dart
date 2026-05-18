@@ -100,6 +100,7 @@ class _SequencedBlockListState extends State<_SequencedBlockList> {
     }
 
     if (!widget.paused && _pendingIds.isEmpty && _revealTimer == null) {
+      widget.onSequenceSettled?.call();
       _enterWaiting();
     }
   }

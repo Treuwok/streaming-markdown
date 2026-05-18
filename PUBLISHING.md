@@ -31,6 +31,10 @@ cd ../website && npm ci && npm run build
 flutter pub publish --dry-run
 ```
 
+The example web build above is also the static chatbot demo embedded in the
+documentation site, so rebuild it whenever release notes or docs claim the live
+demo matches the shipped example.
+
 Build and verify the Tree-sitter WASM asset before every release. The generated
 files are committed and published with the package so app developers do not need
 to add scripts, copy assets, or change web configuration:
