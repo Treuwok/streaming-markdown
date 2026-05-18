@@ -513,6 +513,7 @@ class _ResultTile extends StatelessWidget {
           tokenStaggerDelay: Duration.zero,
           tokenAnimationDuration: Duration.zero,
           tokenCompaction: AnimatedMarkdownTokenCompaction.disabled,
+          showCodeBlockCopyButton: true,
         ),
       ),
     );

@@ -154,7 +154,10 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
       return const SizedBox.shrink();
     }
 
-    final String language = _codeLanguage(node.raw);
+    final bool indentedCode = node.type == 'indented_code_block';
+    final String language = indentedCode ? 'code' : _codeLanguage(node.raw);
+    final bool showHeader =
+        indentedCode || language.isNotEmpty || showCodeBlockCopyButton;
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -165,7 +168,7 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (language.isNotEmpty)
+          if (showHeader)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -176,14 +179,34 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
                   top: Radius.circular(8),
                 ),
               ),
-              child: Text(
-                language,
-                style: markdownTheme.codeBlockLanguageTextStyle ??
-                    const TextStyle(
-                      color: Color(0xFF8B949E),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: language.isEmpty
+                        ? const SizedBox.shrink()
+                        : Text(
+                            language,
+                            style: markdownTheme.codeBlockLanguageTextStyle ??
+                                const TextStyle(
+                                  color: Color(0xFF8B949E),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                  ),
+                  if (showCodeBlockCopyButton)
+                    IconButton(
+                      tooltip: 'Copy code',
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 18,
+                      color: markdownTheme.codeBlockLanguageTextStyle?.color ??
+                          const Color(0xFF8B949E),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: code));
+                      },
+                      icon: const Icon(Icons.copy_all_outlined),
                     ),
+                ],
               ),
             ),
           Padding(

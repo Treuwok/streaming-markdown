@@ -178,7 +178,7 @@ extension _StreamingMarkdownInlineTokenSpans on StreamingMarkdownRenderView {
     }
     int total = 0;
     for (final _InlineToken token in tokens) {
-      if (token.isImage || token.isFootnoteReference) {
+      if (token.isImage || token.isFootnoteReference || token.isLatex) {
         total += 1;
         continue;
       }

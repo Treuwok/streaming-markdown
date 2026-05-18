@@ -23,6 +23,7 @@ void main() {
                 nodes: value,
                 padding: EdgeInsets.zero,
                 tokenArrivalDelay: const Duration(milliseconds: 20),
+                tokenFadeInDuration: Duration.zero,
                 onTokenArrivalWait: () {
                   waitCount += 1;
                 },
@@ -87,6 +88,124 @@ void main() {
     await pumpView();
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('B'), findsOneWidget);
+  });
+
+  testWidgets('next block waits for previous token fade to finish', (
+    WidgetTester tester,
+  ) async {
+    final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+      _node('Alpha', 0),
+      _node('Beta', 10),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StreamingMarkdownRenderView(
+            nodes: nodes,
+            padding: EdgeInsets.zero,
+            tokenArrivalDelay: const Duration(milliseconds: 20),
+            tokenFadeInDuration: const Duration(milliseconds: 100),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Alpha'), findsOneWidget);
+    expect(find.text('Beta'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(find.text('Beta'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(find.text('Beta'), findsOneWidget);
+  });
+
+  testWidgets('next block waits when previous streamed block grows', (
+    WidgetTester tester,
+  ) async {
+    final ValueNotifier<List<MarkdownRenderNode>> nodes =
+        ValueNotifier<List<MarkdownRenderNode>>(<MarkdownRenderNode>[
+      _node('Alpha', 0),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ValueListenableBuilder<List<MarkdownRenderNode>>(
+            valueListenable: nodes,
+            builder: (BuildContext context, List<MarkdownRenderNode> value, _) {
+              return StreamingMarkdownRenderView(
+                nodes: value,
+                padding: EdgeInsets.zero,
+                tokenArrivalDelay: const Duration(milliseconds: 20),
+                tokenFadeInDuration: const Duration(milliseconds: 100),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Alpha'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 20));
+    nodes.value = <MarkdownRenderNode>[
+      _node('Alpha beta gamma delta', 0),
+      _node('Next', 100),
+    ];
+    await tester.pump();
+
+    expect(find.text('Next'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(find.text('Next'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 40));
+    expect(find.text('Next'), findsOneWidget);
+  });
+
+  testWidgets('streaming updates do not indefinitely postpone pending block', (
+    WidgetTester tester,
+  ) async {
+    final ValueNotifier<List<MarkdownRenderNode>> nodes =
+      ValueNotifier<List<MarkdownRenderNode>>(<MarkdownRenderNode>[
+      _node('Hello', 0),
+      _node('Next', 100),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ValueListenableBuilder<List<MarkdownRenderNode>>(
+            valueListenable: nodes,
+            builder: (BuildContext context, List<MarkdownRenderNode> value, _) {
+              return StreamingMarkdownRenderView(
+                nodes: value,
+                padding: EdgeInsets.zero,
+                tokenArrivalDelay: const Duration(milliseconds: 20),
+                tokenFadeInDuration: const Duration(milliseconds: 120),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Hello'), findsOneWidget);
+    expect(find.text('Next'), findsNothing);
+
+    for (int i = 0; i < 12; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+      nodes.value = <MarkdownRenderNode>[
+        _node('Hello ${List<String>.filled(i + 1, 'token').join(' ')}', 0),
+        _node('Next', 100),
+      ];
+      await tester.pump();
+    }
+
+    await tester.pump(const Duration(milliseconds: 180));
+    expect(find.text('Next'), findsOneWidget);
   });
 }
 

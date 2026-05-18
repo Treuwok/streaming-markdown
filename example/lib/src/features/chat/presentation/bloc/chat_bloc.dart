@@ -1,6 +1,6 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:animated_streaming_markdown/animated_streaming_markdown.dart';
 
+import '../../domain/models/chat_connection_settings.dart';
 import '../../domain/usecases/stream_chat_answer_use_case.dart';
 
 sealed class ChatEvent {
@@ -12,91 +12,67 @@ final class ChatStarted extends ChatEvent {
 }
 
 final class ChatSubmitted extends ChatEvent {
-  const ChatSubmitted({required this.question});
+  const ChatSubmitted({required this.question, required this.settings});
 
   final String question;
+  final ChatConnectionSettings settings;
+}
+
+final class ChatCleared extends ChatEvent {
+  const ChatCleared();
 }
 
 final class ChatState {
   const ChatState({
-    required this.isWorkerReady,
     required this.isSubmitting,
     required this.status,
-    required this.answerMarkdown,
-    required this.answerNodes,
-    required this.streamedTokens,
+    required this.messages,
   });
 
   const ChatState.initial()
     : this(
-        isWorkerReady: false,
         isSubmitting: false,
-        status: 'Enter a question and press Submit.',
-        answerMarkdown: '',
-        answerNodes: const <MarkdownBlock>[],
-        streamedTokens: const <String>[],
+        status: 'Choose a provider and send a message.',
+        messages: const <ChatMessage>[],
       );
 
-  final bool isWorkerReady;
   final bool isSubmitting;
   final String status;
-  final String answerMarkdown;
-  final List<MarkdownBlock> answerNodes;
-  final List<String> streamedTokens;
+  final List<ChatMessage> messages;
 
   ChatState copyWith({
-    bool? isWorkerReady,
     bool? isSubmitting,
     String? status,
-    String? answerMarkdown,
-    List<MarkdownBlock>? answerNodes,
-    List<String>? streamedTokens,
+    List<ChatMessage>? messages,
   }) {
     return ChatState(
-      isWorkerReady: isWorkerReady ?? this.isWorkerReady,
       isSubmitting: isSubmitting ?? this.isSubmitting,
       status: status ?? this.status,
-      answerMarkdown: answerMarkdown ?? this.answerMarkdown,
-      answerNodes: answerNodes ?? this.answerNodes,
-      streamedTokens: streamedTokens ?? this.streamedTokens,
+      messages: messages ?? this.messages,
     );
   }
 }
 
 final class ChatBloc extends Bloc<ChatEvent, ChatState> {
-  ChatBloc({
-    required StreamChatAnswerUseCase streamAnswerUseCase,
-    required MarkdownStreamParser parserWorker,
-    required RopeString rope,
-  }) : _streamAnswerUseCase = streamAnswerUseCase,
-       _parserWorker = parserWorker,
-       _rope = rope,
-       super(const ChatState.initial()) {
+  ChatBloc({required StreamChatAnswerUseCase streamAnswerUseCase})
+    : _streamAnswerUseCase = streamAnswerUseCase,
+      super(const ChatState.initial()) {
     on<ChatStarted>(_onStarted);
     on<ChatSubmitted>(_onSubmitted);
+    on<ChatCleared>(_onCleared);
   }
 
   final StreamChatAnswerUseCase _streamAnswerUseCase;
-  final MarkdownStreamParser _parserWorker;
-  final RopeString _rope;
 
-  Future<void> _onStarted(ChatStarted event, Emitter<ChatState> emit) async {
-    try {
-      await _parserWorker.start();
-      emit(
-        state.copyWith(
-          isWorkerReady: true,
-          status: 'Enter a question and press Submit.',
-        ),
-      );
-    } catch (error) {
-      emit(
-        state.copyWith(
-          isWorkerReady: false,
-          status: 'Could not start markdown worker: $error',
-        ),
-      );
+  void _onStarted(ChatStarted event, Emitter<ChatState> emit) {
+    emit(state.copyWith(status: 'Choose a provider and send a message.'));
+  }
+
+  void _onCleared(ChatCleared event, Emitter<ChatState> emit) {
+    if (state.isSubmitting) {
+      return;
     }
+    emit(const ChatState.initial());
   }
 
   Future<void> _onSubmitted(
@@ -112,74 +88,95 @@ final class ChatBloc extends Bloc<ChatEvent, ChatState> {
       return;
     }
 
-    if (!state.isWorkerReady) {
-      emit(state.copyWith(status: 'Markdown worker is not ready.'));
-      return;
-    }
-
+    final String turnId = DateTime.now().microsecondsSinceEpoch.toString();
+    final List<ChatMessage> nextMessages = <ChatMessage>[
+      ...state.messages,
+      ChatMessage(
+        id: 'user_$turnId',
+        role: 'user',
+        content: question,
+        complete: true,
+      ),
+      ChatMessage(id: 'assistant_$turnId', role: 'assistant', content: ''),
+    ];
     emit(
       state.copyWith(
         isSubmitting: true,
-        status: 'Calling Gemini...',
-        answerMarkdown: '',
-        answerNodes: const <MarkdownBlock>[],
-        streamedTokens: const <String>[],
+        status: 'Calling ${event.settings.provider.label}...',
+        messages: nextMessages,
       ),
     );
 
-    _rope.clear();
+    final int assistantIndex = nextMessages.length - 1;
+    final StringBuffer answer = StringBuffer();
 
     try {
-      await _parserWorker.replace('');
-
-      int chunkCount = 0;
-      await for (final String chunk in _streamAnswerUseCase(question)) {
+      await for (final String chunk in _streamAnswerUseCase(
+        ChatCompletionRequest(
+          settings: event.settings,
+          messages: nextMessages.take(assistantIndex).toList(growable: false),
+        ),
+      )) {
         if (chunk.isEmpty) {
           continue;
         }
-
-        chunkCount += 1;
-        _rope.append(chunk);
-        final MarkdownParseResult parseResult = await _parserWorker.append(
-          chunk,
+        answer.write(chunk);
+        final List<ChatMessage> updatedMessages = List<ChatMessage>.from(
+          state.messages,
         );
-        final List<String> nextTokens = List<String>.from(state.streamedTokens)
-          ..addAll(_tokenizeChunk(chunk));
-
+        updatedMessages[assistantIndex] = updatedMessages[assistantIndex]
+            .copyWith(content: answer.toString());
         emit(
           state.copyWith(
-            answerMarkdown: _rope.toString(),
-            answerNodes: parseResult.blocks,
-            streamedTokens: nextTokens,
-            status: 'Receiving data... ($chunkCount chunks)',
+            messages: updatedMessages,
+            status: 'Streaming ${event.settings.provider.label}...',
           ),
         );
       }
 
-      final String finalStatus = _rope.isEmpty
-          ? 'Gemini returned no answer content.'
-          : 'Answer received.';
-      emit(state.copyWith(isSubmitting: false, status: finalStatus));
-    } catch (error) {
       emit(
-        state.copyWith(isSubmitting: false, status: 'API call failed: $error'),
+        state.copyWith(
+          isSubmitting: false,
+          status: answer.isEmpty ? 'No answer content returned.' : 'Ready.',
+          messages: _completeAssistantMessage(state.messages, assistantIndex),
+        ),
+      );
+    } catch (error) {
+      final List<ChatMessage> updatedMessages = List<ChatMessage>.from(
+        state.messages,
+      );
+      updatedMessages[assistantIndex] = updatedMessages[assistantIndex]
+          .copyWith(
+            content: 'Request failed:\n\n```text\n$error\n```',
+            complete: true,
+          );
+      emit(
+        state.copyWith(
+          isSubmitting: false,
+          status: 'Request failed.',
+          messages: updatedMessages,
+        ),
       );
     }
   }
 
-  @override
-  Future<void> close() {
-    _parserWorker.dispose();
-    _streamAnswerUseCase.dispose();
-    return super.close();
+  List<ChatMessage> _completeAssistantMessage(
+    List<ChatMessage> messages,
+    int assistantIndex,
+  ) {
+    final List<ChatMessage> updatedMessages = List<ChatMessage>.from(messages);
+    if (assistantIndex < 0 || assistantIndex >= updatedMessages.length) {
+      return updatedMessages;
+    }
+    updatedMessages[assistantIndex] = updatedMessages[assistantIndex].copyWith(
+      complete: true,
+    );
+    return updatedMessages;
   }
 
-  Iterable<String> _tokenizeChunk(String chunk) sync* {
-    for (final RegExpMatch match in RegExp(r'\S+').allMatches(chunk)) {
-      final String token = match.group(0) ?? '';
-      if (token.isNotEmpty) {
-        yield token;
-      }
-    }
+  @override
+  Future<void> close() {
+    _streamAnswerUseCase.dispose();
+    return super.close();
   }
 }

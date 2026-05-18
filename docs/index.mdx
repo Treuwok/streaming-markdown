@@ -26,10 +26,16 @@ hand.
 - Typed `MarkdownParseResult.blocks` output.
 - Flutter renderer for lists, tables, code blocks, HTML blocks, footnotes, and
   common inline Markdown.
+- KaTeX-compatible LaTeX rendering for inline and display math through
+  `flutter_math_fork`.
 - Per-token animation timing and custom token animation builders.
 - Optional Markdown-aware selection copy.
 - Native tree-sitter parser integration on Android, iOS, macOS, Linux, and
   Windows.
+- Zero-config Tree-sitter WASM parser support for Flutter web builds, with
+  pure-Dart fallback.
+- A static Flutter web chatbot demo that connects to Ollama, ChatGPT, Claude,
+  Gemini, and Grok-compatible streaming APIs.
 
 ## Platform Support
 
@@ -41,11 +47,15 @@ The package is built for Flutter native targets:
 - Linux
 - Windows
 
-Web imports are guarded by stubs where possible, but web is not an officially
-supported rendering target.
+Flutter web is supported by the published package. The generated Tree-sitter
+WASM parser asset is bundled as a package asset and loaded automatically, so app
+developers do not need to edit `web/index.html` or add custom build scripts.
+When the WASM asset is unavailable during development, the parser falls back to
+the pure-Dart implementation.
 
 ## Next Steps
 
 - Install the package from [Installation](/installation).
 - Render your first stream in [Quick Start](/quick-start).
+- Try the embedded [Live Chat Demo](/live-chat-demo).
 - Review the public surface in [API Overview](/api-overview).

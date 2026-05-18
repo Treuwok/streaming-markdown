@@ -146,6 +146,7 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
     final List<String> cells = <String>[];
     final StringBuffer current = StringBuffer();
     int codeFenceLength = 0;
+    String? latexEndDelimiter;
     bool escaped = false;
 
     for (int i = 0; i < value.length; i++) {
@@ -157,8 +158,35 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
         continue;
       }
 
+      if (latexEndDelimiter != null) {
+        if (value.startsWith(latexEndDelimiter, i)) {
+          current.write(latexEndDelimiter);
+          i += latexEndDelimiter.length - 1;
+          latexEndDelimiter = null;
+          continue;
+        }
+        current.write(ch);
+        continue;
+      }
+
       if (ch == '\\') {
+        final String? endDelimiter = _latexEndDelimiterForBackslash(value, i);
+        if (endDelimiter != null) {
+          latexEndDelimiter = endDelimiter;
+        }
         escaped = true;
+        current.write(ch);
+        continue;
+      }
+
+      if (ch == r'$') {
+        if (value.startsWith(r'$$', i)) {
+          latexEndDelimiter = r'$$';
+          current.write(r'$$');
+          i += 1;
+          continue;
+        }
+        latexEndDelimiter = r'$';
         current.write(ch);
         continue;
       }
@@ -200,5 +228,15 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
     return cells
         .map((String cell) => cell.replaceAll(r'\|', '|'))
         .toList(growable: false);
+  }
+
+  String? _latexEndDelimiterForBackslash(String value, int index) {
+    if (value.startsWith(r'\(', index)) {
+      return r'\)';
+    }
+    if (value.startsWith(r'\[', index)) {
+      return r'\]';
+    }
+    return null;
   }
 }

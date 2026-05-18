@@ -105,6 +105,16 @@ class _SelectableInlineTextOverlayState
         continue;
       }
 
+      if (token.isLatex) {
+        spans.add(
+          TextSpan(
+            text: token.sourceMarkdown,
+            style: _selectionOverlayStyle(widget.baseStyle),
+          ),
+        );
+        continue;
+      }
+
       TextStyle style = widget.baseStyle;
       if (token.style.bold) {
         style = style.copyWith(fontWeight: FontWeight.w700);
@@ -113,13 +123,13 @@ class _SelectableInlineTextOverlayState
         style = style.copyWith(fontStyle: FontStyle.italic);
       }
       if (token.style.strikethrough) {
-        style = style.copyWith(decoration: TextDecoration.lineThrough);
+        style = style.copyWith(decoration: TextDecoration.none);
       }
       if (token.style.code) {
         style = style.copyWith(fontFamily: 'monospace', fontSize: 12);
       }
       if (token.linkUrl != null && token.linkUrl!.isNotEmpty) {
-        style = style.copyWith(decoration: TextDecoration.underline);
+        style = style.copyWith(decoration: TextDecoration.none);
       }
 
       spans.add(
@@ -145,7 +155,9 @@ class _SelectableInlineTextOverlayState
 TextStyle _selectionOverlayStyle(TextStyle style) {
   final Paint transparentPaint = Paint()..color = Colors.transparent;
   return style.copyWith(
+    decoration: TextDecoration.none,
     decorationColor: Colors.transparent,
+    decorationThickness: 0,
     shadows: const <Shadow>[],
     foreground: transparentPaint,
     background: transparentPaint,

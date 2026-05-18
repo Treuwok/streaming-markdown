@@ -1,356 +1,641 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:ui';
 
+import 'package:animated_streaming_markdown/animated_streaming_markdown.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:animated_streaming_markdown/animated_streaming_markdown.dart';
+import 'package:flutter/scheduler.dart';
 
+import '../../domain/models/chat_connection_settings.dart';
 import '../bloc/chat_bloc.dart';
-
-enum _TokenRenderCommand { none, completeNow }
-
-// Flutter SDK in this repo exposes Durations.short1 (50ms), used as
-// compatibility default for "extraShort1".
-const Duration _kDefaultTokenRenderInterval = Durations.short1;
-
-final class TokenRenderController extends ChangeNotifier {
-  _TokenRenderCommand _pendingCommand = _TokenRenderCommand.none;
-
-  /// Skip animation and immediately render all currently queued tokens.
-  void completeNow() {
-    _pendingCommand = _TokenRenderCommand.completeNow;
-    notifyListeners();
-  }
-
-  _TokenRenderCommand _takePendingCommand() {
-    final _TokenRenderCommand command = _pendingCommand;
-    _pendingCommand = _TokenRenderCommand.none;
-    return command;
-  }
-}
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
-    this.tokenRenderInterval = _kDefaultTokenRenderInterval,
-    this.markdownTokenFadeInRelativeToDelay = 1,
-    this.markdownTokenFadeInDuration,
-    this.markdownEnableSelection = false,
+    required this.initialSettings,
     this.markdownTheme = const AnimatedMarkdownThemeData(),
-    this.markdownCustomBlockBuilder,
-    this.markdownOnLinkTap,
-    this.embedInScaffold = true,
-    this.showComposer = true,
-    this.appBarTitle = 'Gemini Markdown Demo',
-    this.onSubmitQuestion,
-    this.onTokenRenderEnd,
-    this.tokenRenderController,
     super.key,
   });
 
-  final Duration tokenRenderInterval;
-  final double markdownTokenFadeInRelativeToDelay;
-  final Duration? markdownTokenFadeInDuration;
-  final bool markdownEnableSelection;
+  final ChatConnectionSettings initialSettings;
   final AnimatedMarkdownThemeData markdownTheme;
-  final AnimatedMarkdownBlockBuilder? markdownCustomBlockBuilder;
-  final ValueChanged<String>? markdownOnLinkTap;
-  final bool embedInScaffold;
-  final bool showComposer;
-  final String appBarTitle;
-  final ValueChanged<String>? onSubmitQuestion;
-
-  /// Called when UI has rendered all currently available server content.
-  /// [forced] is true when completion is triggered by [TokenRenderController].
-  final ValueChanged<bool>? onTokenRenderEnd;
-  final TokenRenderController? tokenRenderController;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
 
 class _ChatPageState extends State<ChatPage> {
-  final TextEditingController _questionController = TextEditingController();
-  final ScrollController _tokenScrollController = ScrollController();
-  final Queue<String> _pendingSegments = Queue<String>();
-  final MarkdownStreamParser _renderWorker = MarkdownStreamParser();
-  final RopeString _displayRope = RopeString();
+  final TextEditingController _messageController = TextEditingController();
+  final TextEditingController _modelController = TextEditingController();
+  final TextEditingController _baseUrlController = TextEditingController();
+  final TextEditingController _apiKeyController = TextEditingController();
+  final TextEditingController _systemPromptController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
 
-  List<String> _displayedTokens = <String>[];
-  List<MarkdownBlock> _displayedAnswerNodes = <MarkdownBlock>[];
-  String _sourceMarkdown = '';
-  String _displayedMarkdown = '';
-  int _sourceTokenCount = 0;
-
-  bool _isSubmitting = false;
-  bool _didNotifyRenderEnd = false;
-  bool _renderWorkerReady = false;
-  bool _isPumping = false;
-  bool _forceCompleteRequested = false;
+  late ChatConnectionSettings _settings = widget.initialSettings;
+  double _staggerDelayMs = 80;
+  double _firstNodeDelayMs = 0;
+  double _animationDurationMs = 150;
+  Curve _animationCurve = Curves.easeOut;
+  _TokenAnimationPreset _tokenAnimationPreset = _tokenAnimationPresets.first;
 
   @override
   void initState() {
     super.initState();
-    widget.tokenRenderController?.addListener(_onExternalRenderCommand);
-    unawaited(_bootstrapRenderWorker());
-  }
-
-  @override
-  void didUpdateWidget(ChatPage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.tokenRenderController == widget.tokenRenderController) {
-      return;
-    }
-    oldWidget.tokenRenderController?.removeListener(_onExternalRenderCommand);
-    widget.tokenRenderController?.addListener(_onExternalRenderCommand);
+    _syncControllers();
   }
 
   @override
   void dispose() {
-    _questionController.dispose();
-    _tokenScrollController.dispose();
-    widget.tokenRenderController?.removeListener(_onExternalRenderCommand);
-    _renderWorker.dispose();
+    _messageController.dispose();
+    _modelController.dispose();
+    _baseUrlController.dispose();
+    _apiKeyController.dispose();
+    _systemPromptController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _bootstrapRenderWorker() async {
-    try {
-      await _renderWorker.start();
-      List<MarkdownBlock> nodes = <MarkdownBlock>[];
-      if (!_displayRope.isEmpty) {
-        final MarkdownParseResult parseResult = await _renderWorker.replace(
-          _displayRope.toString(),
-        );
-        nodes = parseResult.blocks;
-      }
+  void _syncControllers() {
+    _modelController.text = _settings.model;
+    _baseUrlController.text = _settings.baseUrl;
+    _apiKeyController.text = _settings.apiKey;
+    _systemPromptController.text = _settings.systemPrompt;
+  }
 
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _renderWorkerReady = true;
-        _displayedAnswerNodes = nodes;
-      });
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _renderWorkerReady = false;
-      });
+  void _setProvider(ChatProvider provider) {
+    setState(() {
+      _settings = ChatConnectionSettings.defaults(
+        provider,
+      ).copyWith(apiKey: _apiKeyForProvider(provider));
+      _syncControllers();
+    });
+  }
+
+  String _apiKeyForProvider(ChatProvider provider) {
+    if (provider == ChatProvider.ollama) {
+      return '';
     }
+    if (provider == _settings.provider) {
+      return _apiKeyController.text.trim();
+    }
+    return '';
+  }
+
+  ChatConnectionSettings _currentSettings() {
+    return _settings.copyWith(
+      model: _modelController.text.trim(),
+      baseUrl: _baseUrlController.text.trim(),
+      apiKey: _apiKeyController.text.trim(),
+      systemPrompt: _systemPromptController.text.trim(),
+    );
   }
 
   void _submit() {
-    final String question = _questionController.text;
-    final ValueChanged<String>? onSubmitQuestion = widget.onSubmitQuestion;
-    if (onSubmitQuestion != null) {
-      onSubmitQuestion(question);
+    final String text = _messageController.text.trim();
+    if (text.isEmpty) {
       return;
     }
-    context.read<ChatBloc>().add(ChatSubmitted(question: question));
+    _settings = _currentSettings();
+    context.read<ChatBloc>().add(
+      ChatSubmitted(question: text, settings: _settings),
+    );
+    _messageController.clear();
+    _scrollToEnd();
   }
 
-  // Decision 1: source markdown is always server output.
-  String _sourceMarkdownFromServer(ChatState state) {
-    return state.answerMarkdown;
-  }
-
-  // Decision 2: visible markdown/tokens are UI-delayed.
-  void _onBlocStateUpdated(ChatState state) {
-    _isSubmitting = state.isSubmitting;
-    _syncDelayedRender(_sourceMarkdownFromServer(state));
-  }
-
-  void _onExternalRenderCommand() {
-    final _TokenRenderCommand command =
-        widget.tokenRenderController?._takePendingCommand() ??
-        _TokenRenderCommand.none;
-    if (command != _TokenRenderCommand.completeNow) {
-      return;
-    }
-
-    if (_isPumping) {
-      _forceCompleteRequested = true;
-      return;
-    }
-    unawaited(_flushPendingSegments(forced: true));
-  }
-
-  void _syncDelayedRender(String incomingMarkdown) {
-    if (incomingMarkdown.isEmpty) {
-      _resetRenderState();
-      return;
-    }
-
-    if (_sourceMarkdown.isNotEmpty &&
-        !incomingMarkdown.startsWith(_sourceMarkdown)) {
-      _resetRenderState();
-    }
-
-    if (incomingMarkdown.length < _sourceMarkdown.length) {
-      _resetRenderState();
-    }
-
-    if (incomingMarkdown.length > _sourceMarkdown.length) {
-      final String delta = incomingMarkdown.substring(_sourceMarkdown.length);
-      _sourceMarkdown = incomingMarkdown;
-      _sourceTokenCount += _tokenizeChunk(delta).length;
-      _pendingSegments.addAll(_splitIntoRenderSegments(delta));
-      _didNotifyRenderEnd = false;
-
-      if (widget.tokenRenderInterval <= Duration.zero) {
-        unawaited(_flushPendingSegments(forced: false));
-      } else {
-        _startPump();
+  void _scrollToEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) {
+        return;
       }
-      return;
-    }
-
-    _maybeNotifyRenderEnd(forced: false);
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+    });
   }
 
-  Iterable<String> _splitIntoRenderSegments(String text) sync* {
-    for (final RegExpMatch match in RegExp(r'\S+\s*|\s+').allMatches(text)) {
-      final String segment = match.group(0) ?? '';
-      if (segment.isNotEmpty) {
-        yield segment;
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Streaming Markdown Chat'),
+        actions: [
+          BlocBuilder<ChatBloc, ChatState>(
+            builder: (BuildContext context, ChatState state) {
+              return IconButton(
+                tooltip: 'Clear conversation',
+                onPressed: state.isSubmitting
+                    ? null
+                    : () => context.read<ChatBloc>().add(const ChatCleared()),
+                icon: const Icon(Icons.delete_outline),
+              );
+            },
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: BlocBuilder<ChatBloc, ChatState>(
+          builder: (BuildContext context, ChatState state) {
+            return LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                final bool wide = constraints.maxWidth >= 960;
+                final Widget settingsPanel = _SettingsPanel(
+                  settings: _settings,
+                  enabled: !state.isSubmitting,
+                  modelController: _modelController,
+                  baseUrlController: _baseUrlController,
+                  apiKeyController: _apiKeyController,
+                  systemPromptController: _systemPromptController,
+                  staggerDelayMs: _staggerDelayMs,
+                  firstNodeDelayMs: _firstNodeDelayMs,
+                  animationDurationMs: _animationDurationMs,
+                  animationCurve: _animationCurve,
+                  tokenAnimationPreset: _tokenAnimationPreset,
+                  onStaggerDelayChanged: (double value) {
+                    setState(() {
+                      _staggerDelayMs = value;
+                    });
+                  },
+                  onFirstNodeDelayChanged: (double value) {
+                    setState(() {
+                      _firstNodeDelayMs = value;
+                    });
+                  },
+                  onAnimationDurationChanged: (double value) {
+                    setState(() {
+                      _animationDurationMs = value;
+                    });
+                  },
+                  onAnimationCurveChanged: (Curve value) {
+                    setState(() {
+                      _animationCurve = value;
+                    });
+                  },
+                  onTokenAnimationPresetChanged: (_TokenAnimationPreset value) {
+                    setState(() {
+                      _tokenAnimationPreset = value;
+                    });
+                  },
+                  onProviderChanged: _setProvider,
+                );
+                final Widget chat = _ChatSurface(
+                  scrollController: _scrollController,
+                  messageController: _messageController,
+                  settings: _currentSettings(),
+                  markdownTheme: widget.markdownTheme,
+                  renderTiming: _ChatRenderTiming(
+                    tokenStaggerDelay: Duration(
+                      milliseconds: _staggerDelayMs.round(),
+                    ),
+                    firstNodeDelay: Duration(
+                      milliseconds: _firstNodeDelayMs.round(),
+                    ),
+                    tokenAnimationDuration: Duration(
+                      milliseconds: _animationDurationMs.round(),
+                    ),
+                    tokenAnimationCurve: _animationCurve,
+                    tokenAnimationBuilder: _tokenAnimationPreset.builder,
+                    label:
+                        '${_staggerDelayMs.round()} ms/token • ${_tokenAnimationPreset.name}',
+                  ),
+                  onSubmit: _submit,
+                  onNewContent: _scrollToEnd,
+                );
+
+                if (wide) {
+                  return Row(
+                    children: [
+                      SizedBox(width: 360, child: settingsPanel),
+                      const VerticalDivider(width: 1),
+                      Expanded(child: chat),
+                    ],
+                  );
+                }
+
+                return Column(
+                  children: [
+                    ExpansionTile(
+                      title: Text(
+                        '${_settings.provider.label} / ${_modelController.text}',
+                      ),
+                      leading: const Icon(Icons.tune),
+                      children: [settingsPanel],
+                    ),
+                    const Divider(height: 1),
+                    Expanded(child: chat),
+                  ],
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _CurveOption {
+  const _CurveOption(this.curve, this.name);
+  final Curve curve;
+  final String name;
+}
+
+const List<_CurveOption> _availableCurves = [
+  _CurveOption(Curves.linear, 'Linear'),
+  _CurveOption(Curves.easeOut, 'Ease out'),
+  _CurveOption(Curves.easeIn, 'Ease in'),
+  _CurveOption(Curves.easeInOut, 'Ease in out'),
+  _CurveOption(Curves.bounceOut, 'Bounce out'),
+  _CurveOption(Curves.elasticOut, 'Elastic out'),
+];
+
+class _TokenAnimationPreset {
+  const _TokenAnimationPreset({required this.name, required this.builder});
+
+  final String name;
+  final StreamingMarkdownTokenAnimationBuilder builder;
+}
+
+final List<_TokenAnimationPreset> _tokenAnimationPresets =
+    <_TokenAnimationPreset>[
+      _TokenAnimationPreset(
+        name: 'Fade',
+        builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
+          return Opacity(opacity: token.value, child: token.child);
+        },
+      ),
+      _TokenAnimationPreset(
+        name: 'Slide up',
+        builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
+          final double t = Curves.easeOutCubic.transform(token.value);
+          return Opacity(
+            opacity: t,
+            child: Transform.translate(
+              offset: Offset(0, (1 - t) * 10),
+              child: token.child,
+            ),
+          );
+        },
+      ),
+      _TokenAnimationPreset(
+        name: 'Slide right',
+        builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
+          final double t = Curves.easeOut.transform(token.value);
+          return Opacity(
+            opacity: t,
+            child: Transform.translate(
+              offset: Offset((1 - t) * -14, 0),
+              child: token.child,
+            ),
+          );
+        },
+      ),
+      _TokenAnimationPreset(
+        name: 'Scale pop',
+        builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
+          final double t = Curves.easeOutBack.transform(token.value);
+          return Transform.scale(
+            scale: 0.84 + (0.16 * t),
+            alignment: Alignment.bottomLeft,
+            child: Opacity(opacity: token.value, child: token.child),
+          );
+        },
+      ),
+      _TokenAnimationPreset(
+        name: 'Rotate in',
+        builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
+          final double t = Curves.easeOutQuart.transform(token.value);
+          return Transform.rotate(
+            angle: (1 - t) * -0.16,
+            alignment: Alignment.bottomLeft,
+            child: Opacity(opacity: token.value, child: token.child),
+          );
+        },
+      ),
+      _TokenAnimationPreset(
+        name: 'Blur to clear',
+        builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
+          final double t = Curves.easeOut.transform(token.value);
+          return ImageFiltered(
+            imageFilter: ImageFilter.blur(
+              sigmaX: (1 - t) * 2.6,
+              sigmaY: (1 - t) * 2.6,
+            ),
+            child: Opacity(opacity: t, child: token.child),
+          );
+        },
+      ),
+    ];
+
+class _SettingsPanel extends StatelessWidget {
+  const _SettingsPanel({
+    required this.settings,
+    required this.enabled,
+    required this.modelController,
+    required this.baseUrlController,
+    required this.apiKeyController,
+    required this.systemPromptController,
+    required this.staggerDelayMs,
+    required this.firstNodeDelayMs,
+    required this.animationDurationMs,
+    required this.animationCurve,
+    required this.tokenAnimationPreset,
+    required this.onStaggerDelayChanged,
+    required this.onFirstNodeDelayChanged,
+    required this.onAnimationDurationChanged,
+    required this.onAnimationCurveChanged,
+    required this.onTokenAnimationPresetChanged,
+    required this.onProviderChanged,
+  });
+
+  final ChatConnectionSettings settings;
+  final bool enabled;
+  final TextEditingController modelController;
+  final TextEditingController baseUrlController;
+  final TextEditingController apiKeyController;
+  final TextEditingController systemPromptController;
+  final double staggerDelayMs;
+  final double firstNodeDelayMs;
+  final double animationDurationMs;
+  final Curve animationCurve;
+  final _TokenAnimationPreset tokenAnimationPreset;
+  final ValueChanged<double> onStaggerDelayChanged;
+  final ValueChanged<double> onFirstNodeDelayChanged;
+  final ValueChanged<double> onAnimationDurationChanged;
+  final ValueChanged<Curve> onAnimationCurveChanged;
+  final ValueChanged<_TokenAnimationPreset> onTokenAnimationPresetChanged;
+  final ValueChanged<ChatProvider> onProviderChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      shrinkWrap: true,
+      padding: const EdgeInsets.all(16),
+      children: [
+        DropdownMenu<ChatProvider>(
+          initialSelection: settings.provider,
+          enabled: enabled,
+          label: const Text('Provider'),
+          expandedInsets: EdgeInsets.zero,
+          leadingIcon: Icon(
+            settings.provider == ChatProvider.ollama
+                ? Icons.memory
+                : Icons.cloud_queue,
+          ),
+          dropdownMenuEntries: ChatProvider.values
+              .map(
+                (ChatProvider provider) => DropdownMenuEntry<ChatProvider>(
+                  value: provider,
+                  label: provider.label,
+                  leadingIcon: Icon(
+                    provider == ChatProvider.ollama
+                        ? Icons.memory
+                        : Icons.cloud_queue,
+                  ),
+                ),
+              )
+              .toList(growable: false),
+          onSelected: (ChatProvider? provider) {
+            if (provider != null) {
+              onProviderChanged(provider);
+            }
+          },
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: modelController,
+          enabled: enabled,
+          decoration: const InputDecoration(
+            labelText: 'Model',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: baseUrlController,
+          enabled: enabled,
+          decoration: const InputDecoration(
+            labelText: 'Base URL',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: apiKeyController,
+          enabled: enabled,
+          obscureText: true,
+          decoration: InputDecoration(
+            labelText: settings.provider == ChatProvider.ollama
+                ? 'API key (not needed for Ollama)'
+                : 'API key',
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: systemPromptController,
+          enabled: enabled,
+          minLines: 3,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            labelText: 'System prompt',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        _TimingSlider(
+          label: 'Token reveal interval',
+          icon: Icons.speed,
+          value: staggerDelayMs,
+          min: 0,
+          max: 400,
+          enabled: enabled,
+          onChanged: onStaggerDelayChanged,
+        ),
+        const SizedBox(height: 16),
+        _TimingSlider(
+          label: 'First node delay',
+          icon: Icons.hourglass_top,
+          value: firstNodeDelayMs,
+          min: 0,
+          max: 1200,
+          enabled: enabled,
+          onChanged: onFirstNodeDelayChanged,
+        ),
+        const SizedBox(height: 16),
+        _TimingSlider(
+          label: 'Token animation duration',
+          icon: Icons.bolt,
+          value: animationDurationMs,
+          min: 0,
+          max: 800,
+          enabled: enabled,
+          onChanged: onAnimationDurationChanged,
+        ),
+        const SizedBox(height: 16),
+        DropdownButtonFormField<_TokenAnimationPreset>(
+          initialValue: tokenAnimationPreset,
+          decoration: const InputDecoration(
+            labelText: 'Token animation style',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.auto_awesome_motion_outlined),
+          ),
+          items: _tokenAnimationPresets.map((_TokenAnimationPreset opt) {
+            return DropdownMenuItem<_TokenAnimationPreset>(
+              value: opt,
+              child: Text(opt.name),
+            );
+          }).toList(),
+          onChanged: enabled
+              ? (_TokenAnimationPreset? value) {
+                  if (value != null) {
+                    onTokenAnimationPresetChanged(value);
+                  }
+                }
+              : null,
+        ),
+        const SizedBox(height: 16),
+        DropdownButtonFormField<Curve>(
+          initialValue: animationCurve,
+          decoration: const InputDecoration(
+            labelText: 'Animation curve',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.trending_up),
+          ),
+          items: _availableCurves.map((opt) {
+            return DropdownMenuItem<Curve>(
+              value: opt.curve,
+              child: Text(opt.name),
+            );
+          }).toList(),
+          onChanged: enabled
+              ? (Curve? value) {
+                  if (value != null) {
+                    onAnimationCurveChanged(value);
+                  }
+                }
+              : null,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          _providerHint(settings.provider),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
+
+  String _providerHint(ChatProvider provider) {
+    return switch (provider) {
+      ChatProvider.ollama =>
+        'Run `ollama serve`, then pull a model such as `ollama pull batiai/gemma4-e4b:q4`.',
+      ChatProvider.openai =>
+        'Uses OpenAI-compatible `/v1/chat/completions` streaming.',
+      ChatProvider.anthropic =>
+        'Uses Anthropic Messages streaming with `anthropic-version: 2023-06-01`.',
+      ChatProvider.gemini => 'Uses Gemini `streamGenerateContent` with SSE.',
+      ChatProvider.xai =>
+        'Uses xAI OpenAI-compatible `/v1/chat/completions` streaming.',
+    };
+  }
+}
+
+class _ChatSurface extends StatefulWidget {
+  const _ChatSurface({
+    required this.scrollController,
+    required this.messageController,
+    required this.settings,
+    required this.markdownTheme,
+    required this.renderTiming,
+    required this.onSubmit,
+    required this.onNewContent,
+  });
+
+  final ScrollController scrollController;
+  final TextEditingController messageController;
+  final ChatConnectionSettings settings;
+  final AnimatedMarkdownThemeData markdownTheme;
+  final _ChatRenderTiming renderTiming;
+  final VoidCallback onSubmit;
+  final VoidCallback onNewContent;
+
+  @override
+  State<_ChatSurface> createState() => _ChatSurfaceState();
+}
+
+class _ChatSurfaceState extends State<_ChatSurface> {
+  final Set<String> _settledAssistantIds = <String>{};
+
+  bool _canSubmit(ChatState state) {
+    if (state.isSubmitting) {
+      return false;
+    }
+    for (final ChatMessage message in state.messages) {
+      if (message.role != 'assistant') {
+        continue;
+      }
+      if (!message.complete || !_settledAssistantIds.contains(message.id)) {
+        return false;
       }
     }
+    return true;
   }
 
-  void _startPump() {
-    if (_isPumping) {
-      return;
-    }
-    _isPumping = true;
-    unawaited(_pumpSegments());
-  }
-
-  Future<void> _pumpSegments() async {
-    try {
-      while (mounted) {
-        if (_forceCompleteRequested) {
-          _forceCompleteRequested = false;
-          await _flushPendingSegments(forced: true);
-          break;
-        }
-
-        if (_pendingSegments.isEmpty) {
-          break;
-        }
-
-        final String segment = _pendingSegments.removeFirst();
-        await _appendRenderedSegment(segment);
-
-        if (_pendingSegments.isNotEmpty &&
-            widget.tokenRenderInterval > Duration.zero) {
-          await Future<void>.delayed(widget.tokenRenderInterval);
-        }
-      }
-    } finally {
-      _isPumping = false;
-      _maybeNotifyRenderEnd(forced: false);
-    }
-  }
-
-  Future<void> _appendRenderedSegment(String segment) async {
-    _displayRope.append(segment);
-
-    List<MarkdownBlock> nextNodes = _displayedAnswerNodes;
-    if (_renderWorkerReady) {
-      try {
-        final MarkdownParseResult parseResult = await _renderWorker.append(
-          segment,
-        );
-        nextNodes = parseResult.blocks;
-      } catch (_) {
-        nextNodes = _displayedAnswerNodes;
+  bool _hasIncompleteAssistant(ChatState state) {
+    for (final ChatMessage message in state.messages) {
+      if (message.role == 'assistant' && !message.complete) {
+        return true;
       }
     }
+    return false;
+  }
 
-    final List<String> newTokens = _tokenizeChunk(segment);
+  bool _hasUnsettledAssistant(ChatState state) {
+    for (final ChatMessage message in state.messages) {
+      if (message.role != 'assistant') {
+        continue;
+      }
+      if (!_settledAssistantIds.contains(message.id)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
-    if (!mounted) {
+  String _effectiveStatus(ChatState state) {
+    if (_hasIncompleteAssistant(state)) {
+      return 'Streaming and rendering...';
+    }
+    if (_hasUnsettledAssistant(state)) {
+      return 'Finishing render...';
+    }
+    return state.status;
+  }
+
+  void _syncSettledMessages(ChatState state) {
+    final Set<String> activeAssistantIds = state.messages
+        .where((ChatMessage message) => message.role == 'assistant')
+        .map((ChatMessage message) => message.id)
+        .toSet();
+    final Set<String> before = Set<String>.of(_settledAssistantIds);
+    _settledAssistantIds.removeWhere(
+      (String id) => !activeAssistantIds.contains(id),
+    );
+    for (final ChatMessage message in state.messages) {
+      if (message.role == 'assistant' && !message.complete) {
+        _settledAssistantIds.remove(message.id);
+      }
+    }
+    if (before.length != _settledAssistantIds.length && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _markAssistantSettled(String id) {
+    if (_settledAssistantIds.contains(id)) {
       return;
     }
     setState(() {
-      _displayedMarkdown = _displayRope.toString();
-      _displayedAnswerNodes = nextNodes;
-      if (newTokens.isNotEmpty) {
-        _displayedTokens = <String>[..._displayedTokens, ...newTokens];
-      }
-    });
-    _scrollTokensToEnd();
-  }
-
-  Future<void> _flushPendingSegments({required bool forced}) async {
-    if (_pendingSegments.isNotEmpty) {
-      final String remaining = _pendingSegments.join();
-      _pendingSegments.clear();
-      await _appendRenderedSegment(remaining);
-    }
-    _maybeNotifyRenderEnd(forced: forced);
-  }
-
-  void _resetRenderState() {
-    _pendingSegments.clear();
-    _sourceMarkdown = '';
-    _displayRope.clear();
-    _displayedMarkdown = '';
-    _displayedTokens = <String>[];
-    _sourceTokenCount = 0;
-    _displayedAnswerNodes = <MarkdownBlock>[];
-    _forceCompleteRequested = false;
-    _didNotifyRenderEnd = false;
-
-    if (mounted) {
-      setState(() {});
-    }
-
-    if (_renderWorkerReady) {
-      unawaited(_renderWorker.replace(''));
-    }
-  }
-
-  void _maybeNotifyRenderEnd({required bool forced}) {
-    if (_didNotifyRenderEnd) {
-      return;
-    }
-
-    final bool finishedCurrentBuffer =
-        _pendingSegments.isEmpty && _displayedMarkdown == _sourceMarkdown;
-    if (!finishedCurrentBuffer) {
-      return;
-    }
-    if (!forced && _isSubmitting) {
-      // UI rendered everything currently available, but server is still streaming.
-      // Keep waiting for new content.
-      return;
-    }
-
-    _didNotifyRenderEnd = true;
-    widget.onTokenRenderEnd?.call(forced);
-  }
-
-  List<String> _tokenizeChunk(String chunk) {
-    return RegExp(r'\S+')
-        .allMatches(chunk)
-        .map((RegExpMatch match) => match.group(0) ?? '')
-        .where((String token) => token.isNotEmpty)
-        .toList(growable: false);
-  }
-
-  void _scrollTokensToEnd() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_tokenScrollController.hasClients) {
-        return;
-      }
-      _tokenScrollController.animateTo(
-        _tokenScrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-      );
+      _settledAssistantIds.add(id);
     });
   }
 
@@ -358,166 +643,775 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     return BlocConsumer<ChatBloc, ChatState>(
       listener: (BuildContext context, ChatState state) {
-        _onBlocStateUpdated(state);
+        _syncSettledMessages(state);
+        widget.onNewContent();
       },
       builder: (BuildContext context, ChatState state) {
-        final Widget answerArea;
-        if (_displayedAnswerNodes.isNotEmpty) {
-          answerArea = SingleChildScrollView(
-            child: AnimatedStreamingMarkdown(
-              blocks: _displayedAnswerNodes,
-              allowIncompleteInlineSyntax: true,
-              tokenStaggerDelay: widget.tokenRenderInterval,
-              tokenAnimationDurationFactor:
-                  widget.markdownTokenFadeInRelativeToDelay,
-              tokenAnimationDuration: widget.markdownTokenFadeInDuration,
-              enableSelection: widget.markdownEnableSelection,
-              theme: widget.markdownTheme,
-              blockBuilder: widget.markdownCustomBlockBuilder,
-              onLinkTap: widget.markdownOnLinkTap,
-            ),
-          );
-        } else if (_displayedMarkdown.isNotEmpty) {
-          answerArea = SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: SelectableText(_displayedMarkdown),
-          );
-        } else if (state.isSubmitting) {
-          answerArea = const Center(child: CircularProgressIndicator());
-        } else {
-          answerArea = const Center(child: Text('No answer yet.'));
-        }
-
-        final Widget body = SafeArea(
-          child: LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) {
-              final double tokenPanelHeight = (constraints.maxHeight / 6)
-                  .clamp(90, 170)
-                  .toDouble();
-
-              return Column(
-                children: [
-                  if (widget.showComposer)
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _questionController,
-                              textInputAction: TextInputAction.send,
-                              enabled: !state.isSubmitting,
-                              onSubmitted: (_) => _submit(),
-                              decoration: const InputDecoration(
-                                labelText: 'Question',
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          FilledButton(
-                            onPressed: state.isSubmitting ? null : _submit,
-                            child: state.isSubmitting
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Text('Submit'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        state.status,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Divider(height: 1),
-                  Expanded(child: answerArea),
-                  const Divider(height: 1),
-                  SizedBox(
-                    height: tokenPanelHeight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            child: Text(
-                              'Streaming Tokens (${_displayedTokens.length}/$_sourceTokenCount)',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Expanded(
-                            child: _displayedTokens.isEmpty
-                                ? const Center(child: Text('No tokens yet.'))
-                                : ListView.separated(
-                                    controller: _tokenScrollController,
-                                    scrollDirection: Axis.horizontal,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    itemCount: _displayedTokens.length,
-                                    separatorBuilder: (_, _) =>
-                                        const SizedBox(width: 8),
-                                    itemBuilder:
-                                        (BuildContext context, int index) {
-                                          final String token =
-                                              _displayedTokens[index];
-                                          return DecoratedBox(
-                                            decoration: BoxDecoration(
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .surfaceContainerHighest,
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                            ),
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 8,
-                                                  ),
-                                              child: Text(
-                                                token,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                          );
-                                        },
-                                  ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
+        final bool canSubmit = _canSubmit(state);
+        final String rawMarkdown = _latestAssistantMarkdown(state);
+        final Widget conversation = state.messages.isEmpty
+            ? _EmptyChat(provider: widget.settings.provider)
+            : ListView.builder(
+                key: const PageStorageKey<String>('chat_message_list'),
+                controller: widget.scrollController,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                itemCount: state.messages.length,
+                findChildIndexCallback: (Key key) {
+                  if (key is! ValueKey<String>) {
+                    return null;
+                  }
+                  final String value = key.value;
+                  if (!value.startsWith('message_')) {
+                    return null;
+                  }
+                  final String id = value.substring('message_'.length);
+                  final int index = state.messages.indexWhere(
+                    (ChatMessage message) => message.id == id,
+                  );
+                  return index < 0 ? null : index;
+                },
+                itemBuilder: (BuildContext context, int index) {
+                  final ChatMessage message = state.messages[index];
+                  return _MessageBubble(
+                    key: ValueKey<String>('message_${message.id}'),
+                    message: message,
+                    markdownTheme: widget.markdownTheme,
+                    renderTiming: widget.renderTiming,
+                    onAssistantSettled: () {
+                      _markAssistantSettled(message.id);
+                    },
+                  );
+                },
               );
-            },
-          ),
-        );
-
-        if (!widget.embedInScaffold) {
-          return body;
-        }
-        return Scaffold(
-          appBar: AppBar(title: Text(widget.appBarTitle)),
-          body: body,
+        return Column(
+          children: [
+            _StatusBar(
+              status: _effectiveStatus(state),
+              settings: widget.settings,
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints constraints) {
+                  if (constraints.maxWidth < 860) {
+                    return conversation;
+                  }
+                  return Row(
+                    children: [
+                      Expanded(child: conversation),
+                      const VerticalDivider(width: 1),
+                      SizedBox(
+                        width: 360,
+                        child: _RawMarkdownPane(markdown: rawMarkdown),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            const Divider(height: 1),
+            _Composer(
+              controller: widget.messageController,
+              enabled: canSubmit,
+              onSubmit: widget.onSubmit,
+            ),
+          ],
         );
       },
+    );
+  }
+
+  String _latestAssistantMarkdown(ChatState state) {
+    for (final ChatMessage message in state.messages.reversed) {
+      if (message.role == 'assistant') {
+        return message.content;
+      }
+    }
+    return '';
+  }
+}
+
+class _RawMarkdownPane extends StatelessWidget {
+  const _RawMarkdownPane({required this.markdown});
+
+  final String markdown;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextStyle codeStyle =
+        Theme.of(context).textTheme.bodySmall?.copyWith(
+          fontFamily: 'monospace',
+          height: 1.45,
+        ) ??
+        const TextStyle(fontFamily: 'monospace', height: 1.45);
+
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+            child: Row(
+              children: [
+                const Icon(Icons.article_outlined, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  'Raw Markdown',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: SelectableText(
+                markdown.isEmpty ? 'No assistant markdown yet.' : markdown,
+                style: codeStyle,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusBar extends StatelessWidget {
+  const _StatusBar({required this.status, required this.settings});
+
+  final String status;
+  final ChatConnectionSettings settings;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Icon(
+            settings.provider == ChatProvider.ollama
+                ? Icons.memory
+                : Icons.cloud_queue,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${settings.provider.label} • ${settings.model} • $status',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyChat extends StatelessWidget {
+  const _EmptyChat({required this.provider});
+
+  final ChatProvider provider;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                provider == ChatProvider.ollama
+                    ? Icons.terminal
+                    : Icons.chat_bubble_outline,
+                size: 40,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Ask for Markdown, code, tables, lists, LaTeX, or streaming edge cases.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'The assistant response is streamed and rendered with AnimatedStreamingMarkdown.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  const _MessageBubble({
+    super.key,
+    required this.message,
+    required this.markdownTheme,
+    required this.renderTiming,
+    required this.onAssistantSettled,
+  });
+
+  final ChatMessage message;
+  final AnimatedMarkdownThemeData markdownTheme;
+  final _ChatRenderTiming renderTiming;
+  final VoidCallback onAssistantSettled;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool user = message.role == 'user';
+    return Align(
+      alignment: user ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: user
+                ? Theme.of(context).colorScheme.primaryContainer
+                : Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: user
+              ? SelectableText(
+                  message.content,
+                  key: ValueKey<String>('user_text_${message.id}'),
+                )
+              : _AssistantMarkdownBubble(
+                  key: ValueKey<String>('assistant_markdown_${message.id}'),
+                  markdown: message.content,
+                  tokenStaggerDelay: renderTiming.tokenStaggerDelay,
+                  firstNodeDelay: renderTiming.firstNodeDelay,
+                  tokenAnimationDuration: renderTiming.tokenAnimationDuration,
+                  tokenAnimationCurve: renderTiming.tokenAnimationCurve,
+                  tokenAnimationBuilder: renderTiming.tokenAnimationBuilder,
+                  responseComplete: message.complete,
+                  enableSelection: false,
+                  onRenderSettled: onAssistantSettled,
+                  theme: markdownTheme,
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AssistantMarkdownBubble extends StatefulWidget {
+  const _AssistantMarkdownBubble({
+    super.key,
+    required this.markdown,
+    required this.tokenStaggerDelay,
+    required this.firstNodeDelay,
+    required this.tokenAnimationDuration,
+    required this.tokenAnimationCurve,
+    required this.tokenAnimationBuilder,
+    required this.responseComplete,
+    required this.enableSelection,
+    required this.onRenderSettled,
+    required this.theme,
+  });
+
+  final String markdown;
+  final Duration tokenStaggerDelay;
+  final Duration firstNodeDelay;
+  final Duration tokenAnimationDuration;
+  final Curve tokenAnimationCurve;
+  final StreamingMarkdownTokenAnimationBuilder tokenAnimationBuilder;
+  final bool responseComplete;
+  final bool enableSelection;
+  final VoidCallback onRenderSettled;
+  final AnimatedMarkdownThemeData theme;
+
+  @override
+  State<_AssistantMarkdownBubble> createState() =>
+      _AssistantMarkdownBubbleState();
+}
+
+class _AssistantMarkdownBubbleState extends State<_AssistantMarkdownBubble> {
+  final MarkdownStreamParser _parser = MarkdownStreamParser();
+  final Queue<String> _pendingSegments = Queue<String>();
+
+  List<MarkdownBlock> _blocks = const <MarkdownBlock>[];
+  String _sourceMarkdown = '';
+  String _parsedMarkdown = '';
+  bool _parserStarted = false;
+  bool _syncing = false;
+  int _generation = 0;
+  bool _waitingFirstNodeDelay = false;
+  DateTime? _lastRenderActivityAt;
+  Timer? _settledTimer;
+  String? _settledSignature;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_startParser());
+  }
+
+  @override
+  void didUpdateWidget(_AssistantMarkdownBubble oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.markdown != widget.markdown) {
+      _cancelSettledTimer();
+      _settledSignature = null;
+      _syncIncomingMarkdown();
+    } else if (oldWidget.tokenStaggerDelay != widget.tokenStaggerDelay ||
+        oldWidget.firstNodeDelay != widget.firstNodeDelay ||
+        oldWidget.tokenAnimationDuration != widget.tokenAnimationDuration ||
+        oldWidget.tokenAnimationCurve != widget.tokenAnimationCurve ||
+        oldWidget.tokenAnimationBuilder != widget.tokenAnimationBuilder) {
+      _cancelSettledTimer();
+      _settledSignature = null;
+      _schedulePump();
+    }
+  }
+
+  @override
+  void dispose() {
+    _generation += 1;
+    _cancelSettledTimer();
+    _parser.dispose();
+    super.dispose();
+  }
+
+  Future<void> _startParser() async {
+    try {
+      await _parser.start();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _parserStarted = true;
+      });
+      _syncIncomingMarkdown();
+      _scheduleSettledNotification();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error.toString();
+      });
+    }
+  }
+
+  void _syncIncomingMarkdown() {
+    if (!_parserStarted) {
+      return;
+    }
+
+    final String incoming = widget.markdown;
+    if (incoming.isEmpty) {
+      _resetRenderedMarkdown();
+      return;
+    }
+
+    if (_sourceMarkdown.isNotEmpty && !incoming.startsWith(_sourceMarkdown)) {
+      _replaceWithIncomingMarkdown(incoming);
+      return;
+    }
+
+    if (incoming.length < _sourceMarkdown.length) {
+      _replaceWithIncomingMarkdown(incoming);
+      return;
+    }
+
+    if (incoming.length <= _sourceMarkdown.length) {
+      return;
+    }
+
+    final String delta = incoming.substring(_sourceMarkdown.length);
+    _notifyRenderActivity();
+    _sourceMarkdown = incoming;
+    _pendingSegments.add(delta);
+    _schedulePump();
+  }
+
+  void _resetRenderedMarkdown() {
+    _generation += 1;
+    _cancelSettledTimer();
+    _settledSignature = null;
+    _pendingSegments.clear();
+    _waitingFirstNodeDelay = false;
+    _lastRenderActivityAt = null;
+    _sourceMarkdown = '';
+    _parsedMarkdown = '';
+    _syncing = false;
+    setState(() {
+      _blocks = const <MarkdownBlock>[];
+      _error = null;
+    });
+    unawaited(_replaceParserText(''));
+  }
+
+  void _replaceWithIncomingMarkdown(String incoming) {
+    _generation += 1;
+    _cancelSettledTimer();
+    _settledSignature = null;
+    _pendingSegments.clear();
+    _waitingFirstNodeDelay = false;
+    _notifyRenderActivity();
+    _sourceMarkdown = incoming;
+    _parsedMarkdown = incoming;
+    _syncing = false;
+    unawaited(_replaceParserText(incoming));
+  }
+
+  Future<void> _replaceParserText(String text) async {
+    try {
+      final MarkdownParseResult result = await _parser.replace(text);
+      if (!mounted || text != _parsedMarkdown) {
+        return;
+      }
+      setState(() {
+        _blocks = result.blocks;
+        _error = null;
+      });
+      _scheduleSettledNotification();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error.toString();
+      });
+    }
+  }
+
+  void _schedulePump() {
+    if (!_parserStarted || _syncing) {
+      return;
+    }
+    _syncing = true;
+    final int generation = _generation;
+    unawaited(_pumpSegments(generation));
+  }
+
+  Future<void> _pumpSegments(int generation) async {
+    try {
+      while (mounted &&
+          generation == _generation &&
+          _pendingSegments.isNotEmpty) {
+        if (_parsedMarkdown.isEmpty &&
+            !_waitingFirstNodeDelay &&
+            widget.firstNodeDelay > Duration.zero &&
+            widget.markdown.isNotEmpty) {
+          _waitingFirstNodeDelay = true;
+          await Future<void>.delayed(widget.firstNodeDelay);
+          if (!mounted || generation != _generation) {
+            return;
+          }
+          _waitingFirstNodeDelay = false;
+        }
+
+        final String segment = _pendingSegments.removeFirst();
+        final MarkdownParseResult result = await _parser.append(segment);
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _parsedMarkdown += segment;
+          _blocks = result.blocks;
+          _error = null;
+        });
+        _notifyRenderActivity();
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error.toString();
+      });
+    } finally {
+      _syncing = false;
+      if (mounted && _pendingSegments.isNotEmpty) {
+        _schedulePump();
+      } else {
+        _scheduleSettledNotification();
+      }
+    }
+  }
+
+  void _scheduleSettledNotification() {
+    if (!mounted ||
+        !widget.responseComplete ||
+        _syncing ||
+        _waitingFirstNodeDelay ||
+        _pendingSegments.isNotEmpty ||
+        _parsedMarkdown != widget.markdown) {
+      return;
+    }
+
+    final String signature = Object.hashAll(<Object?>[
+      widget.markdown,
+      widget.tokenStaggerDelay,
+      widget.tokenAnimationDuration,
+      widget.tokenAnimationCurve,
+      widget.tokenAnimationBuilder,
+    ]).toString();
+    if (_settledSignature == signature) {
+      return;
+    }
+
+    _cancelSettledTimer();
+    _settledTimer = Timer(_settleQuietWindow(), () async {
+      if (!mounted ||
+          _syncing ||
+          _waitingFirstNodeDelay ||
+          _pendingSegments.isNotEmpty ||
+          _parsedMarkdown != widget.markdown ||
+          !widget.responseComplete) {
+        _scheduleSettledNotification();
+        return;
+      }
+      await SchedulerBinding.instance.endOfFrame;
+      await SchedulerBinding.instance.endOfFrame;
+      final DateTime? lastActivityAt = _lastRenderActivityAt;
+      if (lastActivityAt != null &&
+          DateTime.now().difference(lastActivityAt) < _settleQuietWindow()) {
+        _scheduleSettledNotification();
+        return;
+      }
+      if (!mounted ||
+          _syncing ||
+          _waitingFirstNodeDelay ||
+          _pendingSegments.isNotEmpty ||
+          _parsedMarkdown != widget.markdown ||
+          !widget.responseComplete) {
+        _scheduleSettledNotification();
+        return;
+      }
+      _settledSignature = signature;
+      widget.onRenderSettled();
+    });
+  }
+
+  void _cancelSettledTimer() {
+    _settledTimer?.cancel();
+    _settledTimer = null;
+  }
+
+  void _notifyRenderActivity() {
+    _lastRenderActivityAt = DateTime.now();
+    if (widget.responseComplete) {
+      _cancelSettledTimer();
+      _settledSignature = null;
+      _scheduleSettledNotification();
+    }
+  }
+
+  Duration _settleQuietWindow() {
+    final Duration tail = widget.tokenStaggerDelay * 8;
+    final Duration raw = tail > widget.tokenAnimationDuration
+        ? tail
+        : widget.tokenAnimationDuration;
+    const Duration floor = Duration(milliseconds: 160);
+    const Duration ceiling = Duration(seconds: 3);
+    if (raw < floor) {
+      return floor;
+    }
+    if (raw > ceiling) {
+      return ceiling;
+    }
+    return raw;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) {
+      return SelectableText('Render failed:\n\n$_error');
+    }
+    if (widget.markdown.isEmpty) {
+      return const Text('Thinking...');
+    }
+    if (_blocks.isEmpty) {
+      return const SizedBox(
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+
+    return RepaintBoundary(
+      child: AnimatedStreamingMarkdown(
+        key: const ValueKey<String>('assistant_streaming_markdown_view'),
+        blocks: _blocks,
+        allowIncompleteInlineSyntax: true,
+        tokenStaggerDelay: widget.tokenStaggerDelay,
+        onTokenDelay: _notifyRenderActivity,
+        onTokenAnimationEnd: _notifyRenderActivity,
+        tokenAnimationDuration: widget.tokenAnimationDuration,
+        tokenAnimationCurve: widget.tokenAnimationCurve,
+        tokenAnimationBuilder: widget.tokenAnimationBuilder,
+        enableSelection: widget.enableSelection,
+        showCodeBlockCopyButton: true,
+        theme: widget.theme,
+      ),
+    );
+  }
+}
+
+class _TimingSlider extends StatelessWidget {
+  const _TimingSlider({
+    required this.label,
+    required this.icon,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String label;
+  final IconData icon;
+  final double value;
+  final double min;
+  final double max;
+  final bool enabled;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextTheme textTheme = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: enabled ? null : Theme.of(context).disabledColor,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: textTheme.labelLarge?.copyWith(
+                  color: enabled ? null : Theme.of(context).disabledColor,
+                ),
+              ),
+            ),
+            Text(
+              '${value.round()} ms',
+              style: textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: enabled ? null : Theme.of(context).disabledColor,
+              ),
+            ),
+          ],
+        ),
+        Slider(
+          value: value.clamp(min, max),
+          min: min,
+          max: max,
+          divisions: max > min ? (max - min) ~/ 10 : 1,
+          label: '${value.round()} ms',
+          onChanged: enabled ? onChanged : null,
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              '${min.round()} ms',
+              style: textTheme.bodySmall?.copyWith(
+                color: enabled ? null : Theme.of(context).disabledColor,
+              ),
+            ),
+            Text(
+              '${((min + max) / 2).round()} ms',
+              style: textTheme.bodySmall?.copyWith(
+                color: enabled ? null : Theme.of(context).disabledColor,
+              ),
+            ),
+            Text(
+              '${max.round()} ms',
+              style: textTheme.bodySmall?.copyWith(
+                color: enabled ? null : Theme.of(context).disabledColor,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ChatRenderTiming {
+  const _ChatRenderTiming({
+    required this.tokenStaggerDelay,
+    required this.firstNodeDelay,
+    required this.tokenAnimationDuration,
+    required this.tokenAnimationCurve,
+    required this.tokenAnimationBuilder,
+    required this.label,
+  });
+
+  final Duration tokenStaggerDelay;
+  final Duration firstNodeDelay;
+  final Duration tokenAnimationDuration;
+  final Curve tokenAnimationCurve;
+  final StreamingMarkdownTokenAnimationBuilder tokenAnimationBuilder;
+  final String label;
+}
+
+class _Composer extends StatelessWidget {
+  const _Composer({
+    required this.controller,
+    required this.enabled,
+    required this.onSubmit,
+  });
+
+  final TextEditingController controller;
+  final bool enabled;
+  final VoidCallback onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              enabled: enabled,
+              minLines: 1,
+              maxLines: 5,
+              textInputAction: TextInputAction.newline,
+              decoration: const InputDecoration(
+                hintText: 'Ask something...',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            onPressed: enabled ? onSubmit : null,
+            icon: enabled
+                ? const Icon(Icons.send)
+                : const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+            label: const Text('Send'),
+          ),
+        ],
+      ),
     );
   }
 }

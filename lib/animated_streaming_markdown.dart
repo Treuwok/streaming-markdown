@@ -53,6 +53,7 @@ export 'src/render/view.dart';
 
 /// Tree-sitter markdown parser API returning full syntax trees.
 export 'src/parser/tree_sitter_markdown_parser_stub.dart'
+    if (dart.library.html) 'src/parser/tree_sitter_markdown_parser_web.dart'
     if (dart.library.ffi) 'src/parser/tree_sitter_markdown_parser.dart';
 
 /// Native tree-sitter language pointer helpers.
