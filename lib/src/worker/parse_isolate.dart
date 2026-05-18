@@ -83,8 +83,10 @@ void _parseWorkerMain(SendPort mainSendPort) {
         );
         blockCount = document.blocks.length;
         inlineTypeCount = 0;
-        renderNodes = <Map<String, Object>>[];
-        visibleNodes = <Map<String, Object>>[];
+        renderNodes = includeNodes
+            ? _renderNodeMapsFromDocument(document, fallbackRope.toString())
+            : <Map<String, Object>>[];
+        visibleNodes = renderNodes;
       }
 
       statsWatch.stop();
@@ -256,6 +258,28 @@ bool _shouldDropNode(String type, String content, String raw) {
   }
 
   return content.isEmpty;
+}
+
+List<Map<String, Object>> _renderNodeMapsFromDocument(
+  MarkdownDocument document,
+  String source,
+) {
+  return MarkdownSyncParser._renderNodesFromDocument(document, source)
+      .map(_renderNodeToMap)
+      .toList(growable: false);
+}
+
+Map<String, Object> _renderNodeToMap(MarkdownRenderNode node) {
+  return <String, Object>{
+    'type': node.type,
+    'depth': node.depth,
+    'startByte': node.startByte,
+    'endByte': node.endByte,
+    'startRow': node.startRow,
+    'endRow': node.endRow,
+    'raw': node.raw,
+    'content': node.content,
+  };
 }
 
 bool _keepNodeWhenContentEmpty(String type) {

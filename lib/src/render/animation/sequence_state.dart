@@ -1,9 +1,17 @@
 part of '../view.dart';
 
+class _VisiblePredecessor {
+  const _VisiblePredecessor({required this.id, required this.node});
+
+  final String id;
+  final MarkdownRenderNode node;
+}
+
 class _SequencedBlockListState extends State<_SequencedBlockList> {
   final Set<String> _visibleIds = <String>{};
   final LinkedHashSet<String> _pendingIds = LinkedHashSet<String>();
   final Map<String, DateTime> _revealedAt = <String, DateTime>{};
+  final Map<String, String> _visibleSignatures = <String, String>{};
   Timer? _revealTimer;
   DateTime? _revealTimerStartedAt;
   Duration? _revealTimerDelay;
@@ -25,8 +33,8 @@ class _SequencedBlockListState extends State<_SequencedBlockList> {
       return;
     }
     if (oldWidget.paused && !widget.paused) {
-      _syncSchedule();
       _resumeRevealTimer();
+      _syncSchedule();
       return;
     }
     _syncSchedule();
@@ -46,6 +54,9 @@ class _SequencedBlockListState extends State<_SequencedBlockList> {
     _visibleIds.removeWhere((String id) => !activeIds.contains(id));
     _pendingIds.removeWhere((String id) => !activeIds.contains(id));
     _revealedAt.removeWhere((String id, DateTime _) => !activeIds.contains(id));
+    _visibleSignatures.removeWhere(
+      (String id, String _) => !activeIds.contains(id),
+    );
 
     if (orderedIds.isEmpty) {
       _revealTimer?.cancel();
@@ -54,6 +65,7 @@ class _SequencedBlockListState extends State<_SequencedBlockList> {
       _revealTimerDelay = null;
       _pausedRevealDelay = null;
       _pendingIds.clear();
+      _visibleSignatures.clear();
       if (_visibleIds.isNotEmpty && mounted) {
         setState(() {
           _visibleIds.clear();
@@ -76,9 +88,14 @@ class _SequencedBlockListState extends State<_SequencedBlockList> {
 
     if (queuedNew) {
       _isWaiting = false;
-      if (!widget.paused && _revealTimer == null) {
-        _drainQueue();
+      if (!widget.paused) {
+        _scheduleQueueAfterVisibleTail();
       }
+      return;
+    }
+
+    if (!widget.paused && _pendingIds.isNotEmpty) {
+      _scheduleQueueAfterVisibleTail();
       return;
     }
 
@@ -103,6 +120,9 @@ class _SequencedBlockListState extends State<_SequencedBlockList> {
     setState(() {
       _visibleIds.add(nextId);
       _revealedAt[nextId] = revealedAt;
+      if (revealedNode != null) {
+        _visibleSignatures[nextId] = _nodeSignature(revealedNode);
+      }
     });
 
     if (_pendingIds.isEmpty) {
@@ -110,12 +130,69 @@ class _SequencedBlockListState extends State<_SequencedBlockList> {
       return;
     }
 
-    final Duration delay = _nextDequeueDelayAfterReveal(revealedNode);
+    _scheduleQueueAfterVisibleTail(fallbackNode: revealedNode);
+  }
+
+  void _scheduleQueueAfterVisibleTail({MarkdownRenderNode? fallbackNode}) {
+    if (!mounted || widget.paused || _pendingIds.isEmpty) {
+      return;
+    }
+
+    if (fallbackNode != null) {
+      final Duration delay = _nextDequeueDelayAfterReveal(fallbackNode);
+      if (delay <= Duration.zero) {
+        _drainQueue();
+      } else {
+        _startRevealTimer(delay);
+      }
+      return;
+    }
+
+    final _VisiblePredecessor? predecessor =
+        _visiblePredecessorForNextPending();
+    final MarkdownRenderNode? node = predecessor?.node;
+    if (predecessor == null || node == null) {
+      _drainQueue();
+      return;
+    }
+
+    final String currentSignature = _nodeSignature(node);
+    final String? visibleSignature = _visibleSignatures[predecessor.id];
+    if (visibleSignature == currentSignature) {
+      if (_revealTimer == null) {
+        _drainQueue();
+      }
+      return;
+    }
+
+    final Duration delay = _nextDequeueDelayAfterReveal(node);
     if (delay <= Duration.zero) {
       _drainQueue();
       return;
     }
+    _visibleSignatures[predecessor.id] = currentSignature;
+    if (_revealTimer != null) {
+      return;
+    }
     _startRevealTimer(delay);
+  }
+
+  _VisiblePredecessor? _visiblePredecessorForNextPending() {
+    if (_pendingIds.isEmpty) {
+      return null;
+    }
+    final String nextPendingId = _pendingIds.first;
+    _VisiblePredecessor? predecessor;
+    for (final MarkdownRenderNode node in widget.blocks) {
+      final String id = widget.blockIdentityBuilder(node);
+      if (id == nextPendingId) {
+        return predecessor;
+      }
+      if (_visibleIds.contains(id)) {
+        predecessor = _VisiblePredecessor(id: id, node: node);
+      }
+    }
+    return predecessor;
   }
 
   void _startRevealTimer(Duration delay) {
@@ -172,6 +249,10 @@ class _SequencedBlockListState extends State<_SequencedBlockList> {
       }
     }
     return null;
+  }
+
+  String _nodeSignature(MarkdownRenderNode node) {
+    return '${node.type}\n${node.raw}\n${node.content}';
   }
 
   void _enterWaiting() {

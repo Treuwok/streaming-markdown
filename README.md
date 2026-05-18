@@ -17,6 +17,7 @@
 
   <p align="center">
     Streaming Markdown parser + renderer for Flutter, optimized for incremental append flows.
+    Native targets and Flutter web are supported, including zero-config Tree-sitter WASM assets for published builds.
     <br />
     <a href="https://samnn.dev"><strong>Explore the docs »</strong></a>
     <br />
@@ -31,9 +32,17 @@
 
 <p align="center">
   <a href="https://pub.dev/packages/animated_streaming_markdown">
-    <img src="assets/preview/gemini-demo.gif" alt="animated_streaming_markdown Gemini streaming Markdown demo" width="420">
+    <video src="assets/preview/chat-demo.mp4" poster="assets/preview/chat-demo-screenshot.png" width="720" autoplay muted loop playsinline controls>
+      animated_streaming_markdown chatbot demo
+    </video>
   </a>
 </p>
+
+## Latest Update
+
+- **Flutter web is first-class**: published builds include the generated Tree-sitter WASM parser asset, so app developers do not need to edit `web/index.html` or copy files manually.
+- **KaTeX-style LaTeX rendering**: inline `$...$` / `\(...\)` and display `$$...$$` / `\[...\]` math now render through `flutter_math_fork`, a pure Dart/Flutter KaTeX parser and renderer.
+- **Real chatbot example**: the example app can connect to local Ollama plus ChatGPT/OpenAI, Claude, Gemini, and Grok-compatible cloud APIs.
 
 <details>
   <summary>Table of Contents</summary>
@@ -66,7 +75,7 @@
 `animated_streaming_markdown` provides 2 main layers:
 
 - **Parser**: `MarkdownStreamParser` for typed `replace`/`append` requests
-- **Renderer**: `AnimatedStreamingMarkdown` for block rendering + token reveal animations
+- **Renderer**: `AnimatedStreamingMarkdown` for block rendering, token reveal animations, inline images, links, selection, and KaTeX-compatible LaTeX math
 
 It is designed for chat-like or streaming text interfaces where markdown arrives progressively and needs stable UI updates.
 
@@ -85,15 +94,16 @@ It is designed for chat-like or streaming text interfaces where markdown arrives
 ### Prerequisites
 
 - Flutter `>=3.0.0`
-- Dart SDK `>=2.17.0 <4.0.0`
+- Dart SDK `>=3.0.0 <4.0.0`
 - Native toolchain for your target platform (Android/iOS/macOS/Linux/Windows)
+- No extra setup is required for Flutter web consumers; the package ships the generated WASM parser asset and falls back safely when needed.
 
 ### Installation
 
 1. Add dependency:
    ```yaml
    dependencies:
-    animated_streaming_markdown: ^0.3.3
+    animated_streaming_markdown: ^0.3.4
    ```
 2. Install packages:
    ```sh
@@ -137,7 +147,36 @@ AnimatedStreamingMarkdown(
 );
 ```
 
-### 3) Important APIs
+### 3) Render LaTeX math with KaTeX-compatible syntax
+
+LaTeX is supported in both inline and display forms:
+
+```dart
+AnimatedStreamingMarkdown.fromMarkdown(
+  markdown: r'''
+Inline math: $x^2 + y^2 = z^2$
+
+Display math:
+
+$$
+\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+$$
+''',
+);
+```
+
+Use `latexBuilder` to wrap or replace the default `flutter_math_fork` widget:
+
+```dart
+AnimatedStreamingMarkdown(
+  blocks: appendResult.blocks,
+  latexBuilder: (context, latex) {
+    return latex.defaultWidget;
+  },
+);
+```
+
+### 4) Important APIs
 
 - `MarkdownStreamParser.start()`
 - `MarkdownStreamParser.replace(markdown)`
@@ -154,14 +193,19 @@ AnimatedStreamingMarkdown(
   - `tokenAnimationDuration` / `tokenAnimationDurationFactor`
   - `tokenAnimationBuilder`
   - `onTokenDelay`
+  - `showCodeBlockCopyButton`
   - `enableSelection`
   - `blockBuilder`
+  - `imageBuilder`
+  - `latexBuilder`
 
 For a complete integration sample, check [`example/lib/src/demos/markdown_cases_demo.dart`](example/lib/src/demos/markdown_cases_demo.dart).
+For the full chatbot sample with Ollama, ChatGPT/OpenAI, Claude, Gemini, and Grok providers, check [`example/lib/main.dart`](example/lib/main.dart).
 
 ## Documentation
 
 - [Documentation site](https://samnn.dev)
+- [Live web chatbot demo](https://samnn.dev/live-chat-demo)
 - [Package page](https://pub.dev/packages/animated_streaming_markdown)
 - [Generated API reference](https://pub.dev/documentation/animated_streaming_markdown/latest/)
 - [Example app](https://github.com/samnn152/streaming-markdown/tree/main/example)
@@ -217,7 +261,8 @@ the package behavior more directly:
 - Done: Example with multiple animation presets
 - Done: Docusaurus documentation site for `samnn.dev`
 - Done: Convenience constructors and sync parser helpers
-- Planned: Code block copy and LaTeX support research
+- Done: Opt-in code block copy button
+- Done: KaTeX-compatible LaTeX math rendering
 - Planned: Richer copy modes and improved multi-content drag selection
 - Planned: More parser/renderer benchmark scenarios
 

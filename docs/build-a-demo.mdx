@@ -21,7 +21,7 @@ Add the package:
 
 ```yaml
 dependencies:
-  animated_streaming_markdown: ^0.3.3
+  animated_streaming_markdown: ^0.3.4
 ```
 
 Install dependencies:
@@ -154,6 +154,10 @@ Future<void> _resetDemo() async {
 Use `replace('')` before a new stream so the parser state starts from an empty
 document. During a real API call, call `append(chunk)` whenever your backend or
 model emits the next text chunk.
+
+For a complete real-world chatbot example, see the static
+[Live Chat Demo](/live-chat-demo). The example app supports local Ollama and
+cloud providers that stream Markdown responses.
 
 ## 4. Render the Blocks
 

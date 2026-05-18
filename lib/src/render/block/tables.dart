@@ -58,15 +58,36 @@ extension _StreamingMarkdownTableAndMetadataRenderer
     final Color headerBackground =
         markdownTheme.tableHeaderBackgroundColor ?? const Color(0xFF21262D);
 
+    if (!_tableHasRenderableCell(table)) {
+      return Table(children: const <TableRow>[]);
+    }
+
     Widget buildRevealedCell({
       required Widget child,
       required int tokenUnits,
       required int tokenStartIndex,
+      required int gateTokenStartIndex,
       required bool isFirstRow,
       required bool isFirstColumn,
       required bool isHeader,
     }) {
-      final Widget cell = Container(
+      final Widget gatedChild;
+      if (tokenUnits <= 0) {
+        gatedChild = child;
+      } else {
+        gatedChild = _TokenLayoutGate(
+          initialDelay: tokenScheduleOrigin == null
+              ? resolvedTokenStep * gateTokenStartIndex
+              : Duration.zero,
+          scheduledStart: tokenScheduleOrigin?.add(
+            resolvedTokenStep * gateTokenStartIndex,
+          ),
+          maintainSize: true,
+          child: child,
+        );
+      }
+
+      return Container(
         decoration: BoxDecoration(
           color: isHeader ? headerBackground : null,
           border: Border(
@@ -78,26 +99,14 @@ extension _StreamingMarkdownTableAndMetadataRenderer
             bottom: BorderSide(color: borderColor),
           ),
         ),
-        child: child,
-      );
-
-      if (tokenUnits <= 0) {
-        return const SizedBox.shrink();
-      }
-      return _TokenLayoutGate(
-        initialDelay: tokenScheduleOrigin == null
-            ? resolvedTokenStep * tokenStartIndex
-            : Duration.zero,
-        scheduledStart: tokenScheduleOrigin?.add(
-          resolvedTokenStep * tokenStartIndex,
-        ),
-        child: cell,
+        child: gatedChild,
       );
     }
 
     int tokenStartIndex = 0;
     final List<TableRow> rows = <TableRow>[];
 
+    final int headerGateStartIndex = tokenStartIndex;
     final List<Widget> headerCells = <Widget>[];
     for (int col = 0; col < table.headers.length; col++) {
       final String cell = table.headers[col];
@@ -108,6 +117,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
       headerCells.add(
         buildRevealedCell(
           tokenStartIndex: tokenStartIndex,
+          gateTokenStartIndex: headerGateStartIndex,
           tokenUnits: tokenUnits,
           isFirstRow: true,
           isFirstColumn: col == 0,
@@ -138,6 +148,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
 
     for (int rowIndex = 0; rowIndex < table.rows.length; rowIndex++) {
       final List<String> row = table.rows[rowIndex];
+      final int rowGateStartIndex = tokenStartIndex;
       final List<Widget> bodyCells = <Widget>[];
       for (int col = 0; col < row.length; col++) {
         final String cell = row[col];
@@ -148,6 +159,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
         bodyCells.add(
           buildRevealedCell(
             tokenStartIndex: tokenStartIndex,
+            gateTokenStartIndex: rowGateStartIndex,
             tokenUnits: tokenUnits,
             isFirstRow: false,
             isFirstColumn: col == 0,
@@ -178,5 +190,21 @@ extension _StreamingMarkdownTableAndMetadataRenderer
         children: rows,
       ),
     );
+  }
+
+  bool _tableHasRenderableCell(_ParsedTable table) {
+    for (final String cell in table.headers) {
+      if (cell.trim().isNotEmpty) {
+        return true;
+      }
+    }
+    for (final List<String> row in table.rows) {
+      for (final String cell in row) {
+        if (cell.trim().isNotEmpty) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 }

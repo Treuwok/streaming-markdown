@@ -1,15 +1,16 @@
 import '../../domain/repositories/chat_repository.dart';
-import '../datasources/gemini_remote_data_source.dart';
+import '../../domain/models/chat_connection_settings.dart';
+import '../datasources/chat_remote_data_source.dart';
 
 final class ChatRepositoryImpl implements ChatRepository {
-  ChatRepositoryImpl({required GeminiRemoteDataSource remoteDataSource})
+  ChatRepositoryImpl({required ChatRemoteDataSource remoteDataSource})
     : _remoteDataSource = remoteDataSource;
 
-  final GeminiRemoteDataSource _remoteDataSource;
+  final ChatRemoteDataSource _remoteDataSource;
 
   @override
-  Stream<String> streamAnswer(String question) {
-    return _remoteDataSource.streamAnswer(question);
+  Stream<String> streamAnswer(ChatCompletionRequest request) {
+    return _remoteDataSource.streamAnswer(request);
   }
 
   @override

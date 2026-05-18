@@ -245,11 +245,13 @@ class _TokenLayoutGate extends StatefulWidget {
     this.initialDelay = Duration.zero,
     this.scheduledStart,
     required this.child,
+    this.maintainSize = false,
   });
 
   final Duration initialDelay;
   final DateTime? scheduledStart;
   final Widget child;
+  final bool maintainSize;
 
   @override
   State<_TokenLayoutGate> createState() => _TokenLayoutGateState();
@@ -394,6 +396,15 @@ class _TokenLayoutGateState extends State<_TokenLayoutGate> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.maintainSize) {
+      return Visibility(
+        visible: _visible,
+        maintainSize: true,
+        maintainAnimation: true,
+        maintainState: true,
+        child: widget.child,
+      );
+    }
     if (!_visible) {
       return const SizedBox.shrink();
     }

@@ -2,6 +2,8 @@ import '../model/block_nodes.dart';
 import '../model/render_node.dart';
 import '../parser/rope_markdown_parser.dart';
 import '../model/rope.dart';
+import '../web/wasm_parser_stub.dart'
+    if (dart.library.html) '../web/wasm_parser_web.dart';
 
 /// Preferred result type name for parser operations.
 typedef MarkdownParseResult = StreamingMarkdownParseResult;
@@ -79,14 +81,18 @@ class StreamingMarkdownWarmUpResult {
 
 /// Warms parser resources before the first visible markdown render.
 ///
-/// Non-FFI builds do not have a native parser to load, so this warms the
-/// pure-Dart parser path and optionally the fallback worker wrapper.
+/// Non-FFI builds warm the pure-Dart parser path. Web builds also try to load
+/// the optional Tree-sitter WASM parser asset.
 Future<StreamingMarkdownWarmUpResult> warmUpStreamingMarkdownParser({
   bool includeWorker = false,
 }) async {
   final Stopwatch totalWatch = Stopwatch()..start();
   final Stopwatch currentWatch = Stopwatch()..start();
-  MarkdownSyncParser.parseMarkdown('', includeNodes: false);
+  final bool wasmAvailable =
+      await StreamingMarkdownWasmParser.ensureInitialized();
+  if (!wasmAvailable) {
+    MarkdownSyncParser.parseMarkdown('', includeNodes: false);
+  }
   currentWatch.stop();
 
   Duration? workerTime;
@@ -105,14 +111,14 @@ Future<StreamingMarkdownWarmUpResult> warmUpStreamingMarkdownParser({
 
   totalWatch.stop();
   return StreamingMarkdownWarmUpResult(
-    nativeAvailable: false,
+    nativeAvailable: wasmAvailable,
     currentIsolateTime: currentWatch.elapsed,
     workerTime: workerTime,
     totalTime: totalWatch.elapsed,
   );
 }
 
-/// Web/non-FFI fallback parse worker.
+/// Web/non-FFI parse worker.
 class StreamingMarkdownParseWorker {
   final RopeString _rope = RopeString();
   bool _started = false;
@@ -177,22 +183,39 @@ class StreamingMarkdownParseWorker {
     updateWatch.stop();
 
     final Stopwatch statsWatch = Stopwatch()..start();
-    final int blockCount =
-        const RopeMarkdownParser().parse(_rope).blocks.length;
+    final String markdown = _rope.toString();
+    final bool wasmAvailable =
+        await StreamingMarkdownWasmParser.ensureInitialized();
+    final List<MarkdownRenderNode>? wasmNodes = wasmAvailable && includeNodes
+        ? StreamingMarkdownWasmParser.parseRenderNodes(markdown)
+        : null;
+    final MarkdownDocument document = wasmNodes == null
+        ? const RopeMarkdownParser().parse(_rope)
+        : const MarkdownDocument(
+            blocks: <MarkdownBlockNode>[],
+            length: 0,
+          );
+    final int blockCount = wasmNodes?.length ?? document.blocks.length;
+    final List<MarkdownRenderNode> renderNodes = wasmNodes ??
+        (includeNodes
+            ? MarkdownSyncParser._renderNodesFromDocument(document, markdown)
+            : const <MarkdownRenderNode>[]);
     statsWatch.stop();
     totalWatch.stop();
 
     return StreamingMarkdownParseResult(
       basicBlockCount: blockCount,
       inlineTypeCount: 0,
-      nativeAvailable: false,
-      mode: op == 'append' ? 'fallback-append' : 'fallback-set',
+      nativeAvailable: wasmNodes != null,
+      mode: wasmNodes != null
+          ? (op == 'append' ? 'wasm-append' : 'wasm-set')
+          : (op == 'append' ? 'fallback-append' : 'fallback-set'),
       nodesIncluded: includeNodes,
       updateTime: updateWatch.elapsed,
       statsTime: statsWatch.elapsed,
       totalTime: totalWatch.elapsed,
-      visibleNodes: const <MarkdownRenderNode>[],
-      renderNodes: const <MarkdownRenderNode>[],
+      visibleNodes: renderNodes,
+      renderNodes: renderNodes,
     );
   }
 
@@ -217,7 +240,8 @@ enum MarkdownSyncParserBackend {
 /// Synchronous markdown parser for short documents and first-frame rendering.
 ///
 /// This non-FFI implementation uses the pure-Dart rope parser on the current
-/// isolate. Prefer [StreamingMarkdownParseWorker] for long streamed content.
+/// isolate. Web builds can use Tree-sitter WASM after
+/// [warmUpStreamingMarkdownParser] has loaded the WASM asset.
 class MarkdownSyncParser {
   /// Creates a parser session.
   MarkdownSyncParser({
@@ -295,18 +319,33 @@ class MarkdownSyncParser {
     updateWatch.stop();
 
     final Stopwatch statsWatch = Stopwatch()..start();
-    final MarkdownDocument document = const RopeMarkdownParser().parse(_rope);
-    final List<MarkdownRenderNode> renderNodes = includeNodes
-        ? _renderNodesFromDocument(document, _rope.toString())
-        : const <MarkdownRenderNode>[];
+    final String markdown = _rope.toString();
+    final List<MarkdownRenderNode>? wasmNodes =
+        _backend != MarkdownSyncParserBackend.dart &&
+                StreamingMarkdownWasmParser.isReady &&
+                includeNodes
+            ? StreamingMarkdownWasmParser.parseRenderNodes(markdown)
+            : null;
+    final MarkdownDocument document = wasmNodes == null
+        ? const RopeMarkdownParser().parse(_rope)
+        : const MarkdownDocument(
+            blocks: <MarkdownBlockNode>[],
+            length: 0,
+          );
+    final List<MarkdownRenderNode> renderNodes = wasmNodes ??
+        (includeNodes
+            ? _renderNodesFromDocument(document, markdown)
+            : const <MarkdownRenderNode>[]);
     statsWatch.stop();
     totalWatch.stop();
 
     return StreamingMarkdownParseResult(
-      basicBlockCount: document.blocks.length,
+      basicBlockCount: wasmNodes?.length ?? document.blocks.length,
       inlineTypeCount: 0,
-      nativeAvailable: false,
-      mode: op == 'append' ? _appendMode : _setMode,
+      nativeAvailable: wasmNodes != null,
+      mode: wasmNodes != null
+          ? (op == 'append' ? 'sync-wasm-append' : 'sync-wasm-set')
+          : (op == 'append' ? _appendMode : _setMode),
       nodesIncluded: includeNodes,
       updateTime: updateWatch.elapsed,
       statsTime: statsWatch.elapsed,

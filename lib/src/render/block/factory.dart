@@ -205,6 +205,15 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
     }
 
     final String normalizedParagraph = text.replaceAll('\n', ' ');
+    final TextStyle paragraphStyle = markdownTheme.paragraphTextStyle ??
+        Theme.of(context).textTheme.bodyLarge ??
+        const TextStyle(fontSize: 16);
+
+    final _LatexMatch? displayLatex =
+        _matchSingleDisplayLatex(normalizedParagraph);
+    if (displayLatex != null) {
+      return _buildDisplayLatexBlock(context, displayLatex, paragraphStyle);
+    }
 
     final _InlineImageMatch? image =
         _matchSingleInlineImage(normalizedParagraph);
@@ -215,10 +224,21 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
     return _buildInlineMarkdown(
       context,
       normalizedParagraph,
-      baseStyle: markdownTheme.paragraphTextStyle ??
-          Theme.of(context).textTheme.bodyLarge,
+      baseStyle: paragraphStyle,
       linkReferences: linkReferences,
       footnoteNumbers: footnoteNumbers,
     );
+  }
+
+  _LatexMatch? _matchSingleDisplayLatex(String text) {
+    final String trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final _LatexMatch? dollars = _matchLatexAt(trimmed, 0);
+    if (dollars != null && dollars.display && dollars.end == trimmed.length) {
+      return dollars;
+    }
+    return null;
   }
 }
