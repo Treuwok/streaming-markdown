@@ -627,7 +627,7 @@ void main() {
         matchesGoldenFile('goldens/all_supported_blocks.png'),
       );
     });
-  });
+  }, skip: !Platform.isMacOS);
 
   group('golden animation timeline', () {
     testWidgets('fade animation snapshots at 1.5 animation and settled',
@@ -649,7 +649,7 @@ void main() {
         goldenPrefix: 'goldens/anim_glitch',
       );
     });
-  });
+  }, skip: !Platform.isMacOS);
 }
 
 Future<void> _pumpAnimationGolden(
