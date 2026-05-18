@@ -24,7 +24,20 @@ fi
 
 manifest_value() {
   local key="$1"
-  grep "^$key=" "$MANIFEST_FILE" | head -n 1 | cut -d= -f2-
+  local value
+  value="$(
+    awk -F= -v target="$key" '
+      $1 == target {
+        print substr($0, index($0, "=") + 1)
+        exit
+      }
+    ' "$MANIFEST_FILE" | tr -d '\r'
+  )"
+  if [[ -z "$value" ]]; then
+    echo "invalid web parser manifest: missing $key in ${MANIFEST_FILE#$ROOT_DIR/}" >&2
+    exit 1
+  fi
+  printf '%s\n' "$value"
 }
 
 expected_source_sha="$(manifest_value source_sha256)"
