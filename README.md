@@ -43,7 +43,7 @@
 - **Flutter web is first-class**: published builds include the generated Tree-sitter WASM parser asset, so app developers do not need to edit `web/index.html` or copy files manually.
 - **KaTeX-style LaTeX rendering**: inline `$...$` / `\(...\)` and display `$$...$$` / `\[...\]` math now render through `flutter_math_fork`, a pure Dart/Flutter KaTeX parser and renderer.
 - **Real chatbot example**: the example app can connect to local Ollama plus ChatGPT/OpenAI, Claude, Gemini, and Grok-compatible cloud APIs.
-- **Docs demo is rebuilt from the shipped example**: the embedded static Flutter web chatbot on `samnn.dev` is regenerated from `example/lib/main.dart` for the `0.3.4` release line.
+- **0.3.5 hotfix**: pub.dev platform metadata now explicitly declares Flutter web support to match the shipped WASM-backed implementation.
 
 <details>
   <summary>Table of Contents</summary>
@@ -105,7 +105,7 @@ It is designed for chat-like or streaming text interfaces where markdown arrives
 1. Add dependency:
    ```yaml
    dependencies:
-    animated_streaming_markdown: ^0.3.4
+    animated_streaming_markdown: ^0.3.5
    ```
 2. Install packages:
    ```sh
