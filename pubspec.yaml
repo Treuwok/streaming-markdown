@@ -1,6 +1,6 @@
 name: animated_streaming_markdown
 description: "Flutter markdown streaming package for Android/iOS/macOS/Linux/Windows/web, with Tree-sitter WASM and KaTeX math support."
-version: 0.3.4
+version: 0.3.5
 homepage: https://samnn.dev
 repository: https://github.com/samnn152/streaming-markdown
 issue_tracker: https://github.com/samnn152/streaming-markdown/issues
@@ -11,6 +11,14 @@ topics:
   - flutter
   - animation
   - tree-sitter
+
+platforms:
+  android:
+  ios:
+  linux:
+  macos:
+  web:
+  windows:
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

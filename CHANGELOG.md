@@ -1,3 +1,9 @@
+## 0.3.5
+
+- Hotfix pub.dev platform metadata to declare Flutter web support explicitly.
+- Keep the published web support messaging aligned with the shipped
+  zero-config WASM-backed web implementation.
+
 ## 0.3.4
 
 - Add an opt-in code block copy button via `showCodeBlockCopyButton`.
