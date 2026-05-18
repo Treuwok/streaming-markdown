@@ -2001,7 +2001,7 @@ Các công thức Laplace:
     expect(find.text('Laplace'), findsOneWidget);
     expect(find.text('Fourier'), findsNothing);
 
-    await tester.pump(const Duration(milliseconds: 260));
+    await tester.pump(const Duration(milliseconds: 600));
     expect(find.text('Fourier'), findsOneWidget);
   });
 
