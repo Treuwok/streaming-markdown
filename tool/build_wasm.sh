@@ -64,7 +64,7 @@ CPP_SOURCES=(
 OBJECTS=()
 
 for source in "${C_SOURCES[@]}"; do
-  object="$BUILD_DIR/$(basename "$source" .c)_$(echo "$source" | shasum | cut -d' ' -f1).o"
+  object="$BUILD_DIR/$(basename "$source" .c)_$(printf '%s' "$source" | if command -v shasum >/dev/null 2>&1; then shasum; else sha256sum; fi | cut -d' ' -f1).o"
   "$EMCC_BIN" "${COMMON_FLAGS[@]}" -c "$source" -o "$object"
   OBJECTS+=("$object")
 done
@@ -91,8 +91,8 @@ echo "Wrote $OUT_DIR/streaming_markdown_wasm.js"
 echo "Wrote $OUT_DIR/streaming_markdown_wasm.wasm"
 
 SOURCE_SHA="$(streaming_markdown_wasm_source_digest "$ROOT_DIR")"
-JS_SHA="$(shasum -a 256 "$OUT_DIR/streaming_markdown_wasm.js" | awk '{print $1}')"
-WASM_SHA="$(shasum -a 256 "$OUT_DIR/streaming_markdown_wasm.wasm" | awk '{print $1}')"
+JS_SHA="$(streaming_markdown_sha256 "$OUT_DIR/streaming_markdown_wasm.js")"
+WASM_SHA="$(streaming_markdown_sha256 "$OUT_DIR/streaming_markdown_wasm.wasm")"
 {
   echo "source_sha256=$SOURCE_SHA"
   echo "js_sha256=$JS_SHA"
