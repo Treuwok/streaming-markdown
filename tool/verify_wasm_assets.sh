@@ -32,8 +32,8 @@ expected_js_sha="$(manifest_value js_sha256)"
 expected_wasm_sha="$(manifest_value wasm_sha256)"
 
 actual_source_sha="$(streaming_markdown_wasm_source_digest "$ROOT_DIR")"
-actual_js_sha="$(shasum -a 256 "$JS_FILE" | awk '{print $1}')"
-actual_wasm_sha="$(shasum -a 256 "$WASM_FILE" | awk '{print $1}')"
+actual_js_sha="$(streaming_markdown_sha256 "$JS_FILE")"
+actual_wasm_sha="$(streaming_markdown_sha256 "$WASM_FILE")"
 
 stale=0
 if [[ "$expected_source_sha" != "$actual_source_sha" ]]; then
