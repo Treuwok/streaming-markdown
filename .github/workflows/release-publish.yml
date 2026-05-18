@@ -27,7 +27,7 @@ jobs:
         run: flutter pub get
 
       - name: Verify committed WASM parser assets
-        run: tool/verify_wasm_assets.sh
+        run: bash tool/verify_wasm_assets.sh
 
       - name: Analyze package
         run: dart analyze
