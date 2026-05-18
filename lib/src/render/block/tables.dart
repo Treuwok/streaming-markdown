@@ -47,6 +47,8 @@ extension _StreamingMarkdownTableAndMetadataRenderer
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
   }) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme colorScheme = theme.colorScheme;
     final _RevealScheduleScope? scheduleScope = _RevealScheduleScope.maybeOf(
       context,
     );
@@ -54,129 +56,314 @@ extension _StreamingMarkdownTableAndMetadataRenderer
     final Duration resolvedTokenStep =
         scheduleScope?.tokenArrivalDelay ?? tokenArrivalDelay;
     final Color borderColor =
-        markdownTheme.tableBorderColor ?? const Color(0xFF30363D);
+        markdownTheme.tableBorderColor ??
+        Color.alphaBlend(
+          colorScheme.outline.withValues(alpha: 0.18),
+          colorScheme.outlineVariant,
+        );
     final Color headerBackground =
-        markdownTheme.tableHeaderBackgroundColor ?? const Color(0xFF21262D);
+        markdownTheme.tableHeaderBackgroundColor ??
+        Color.alphaBlend(
+          colorScheme.primary.withValues(alpha: 0.08),
+          colorScheme.surfaceContainerHighest,
+        );
+    final Color bodyBackground = Color.alphaBlend(
+      colorScheme.surface.withValues(alpha: 0.92),
+      colorScheme.surfaceContainerLowest,
+    );
+    final Color alternateRowBackground = Color.alphaBlend(
+      colorScheme.surfaceContainerLow.withValues(alpha: 0.72),
+      colorScheme.surface,
+    );
 
-    Widget buildRevealedCell({
-      required Widget child,
-      required int tokenUnits,
+    if (!_tableHasRenderableCell(table)) {
+      return const SizedBox(key: ValueKey<String>('markdown_table_frame'));
+    }
+
+    Widget buildStableCellContent({
+      required String cell,
       required int tokenStartIndex,
-      required bool isFirstRow,
-      required bool isFirstColumn,
-      required bool isHeader,
+      required TextStyle baseStyle,
     }) {
-      final Widget cell = Container(
-        decoration: BoxDecoration(
-          color: isHeader ? headerBackground : null,
-          border: Border(
-            top: isFirstRow ? BorderSide(color: borderColor) : BorderSide.none,
-            left: isFirstColumn
-                ? BorderSide(color: borderColor)
-                : BorderSide.none,
-            right: BorderSide(color: borderColor),
-            bottom: BorderSide(color: borderColor),
-          ),
+      return _TokenReserveLayoutScope(
+        enabled: true,
+        child: _buildInlineMarkdown(
+          context,
+          cell,
+          tokenStartIndex: tokenStartIndex,
+          baseStyle: baseStyle,
+          linkReferences: linkReferences,
+          footnoteNumbers: footnoteNumbers,
         ),
-        child: child,
-      );
-
-      if (tokenUnits <= 0) {
-        return const SizedBox.shrink();
-      }
-      return _TokenLayoutGate(
-        initialDelay: tokenScheduleOrigin == null
-            ? resolvedTokenStep * tokenStartIndex
-            : Duration.zero,
-        scheduledStart: tokenScheduleOrigin?.add(
-          resolvedTokenStep * tokenStartIndex,
-        ),
-        child: cell,
       );
     }
 
     int tokenStartIndex = 0;
-    final List<TableRow> rows = <TableRow>[];
-
-    final List<Widget> headerCells = <Widget>[];
-    for (int col = 0; col < table.headers.length; col++) {
-      final String cell = table.headers[col];
-      final int tokenUnits = _countAnimatedTokenUnits(
-        cell,
-        linkReferences: linkReferences,
-      );
-      headerCells.add(
-        buildRevealedCell(
-          tokenStartIndex: tokenStartIndex,
-          tokenUnits: tokenUnits,
-          isFirstRow: true,
-          isFirstColumn: col == 0,
-          isHeader: true,
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: _buildInlineMarkdown(
-              context,
-              cell,
-              tokenStartIndex: tokenStartIndex,
-              baseStyle: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-              linkReferences: linkReferences,
-              footnoteNumbers: footnoteNumbers,
-            ),
-          ),
-        ),
-      );
-      tokenStartIndex += tokenUnits;
-    }
-    rows.add(
-      TableRow(
-        children: headerCells,
-      ),
+    final List<double> columnWidths = _tableColumnWidths(context, table);
+    final double tableWidth = columnWidths.fold<double>(
+      0,
+      (double sum, double width) => sum + width,
     );
 
-    for (int rowIndex = 0; rowIndex < table.rows.length; rowIndex++) {
-      final List<String> row = table.rows[rowIndex];
-      final List<Widget> bodyCells = <Widget>[];
-      for (int col = 0; col < row.length; col++) {
-        final String cell = row[col];
+    Widget buildCellPadding({
+      required String cell,
+      required int tokenStartIndex,
+      required TextStyle baseStyle,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: buildStableCellContent(
+          cell: cell,
+          tokenStartIndex: tokenStartIndex,
+          baseStyle: baseStyle,
+        ),
+      );
+    }
+
+    Widget buildRow({
+      required List<String> cells,
+      required int rowTokenStartIndex,
+      required bool isHeader,
+      required int bodyRowIndex,
+      required bool revealWithGate,
+      required int rowIndex,
+    }) {
+      int localTokenIndex = rowTokenStartIndex;
+      final List<Widget> children = <Widget>[];
+      for (int col = 0; col < table.headers.length; col++) {
+        final String cell = col < cells.length ? cells[col] : '';
         final int tokenUnits = _countAnimatedTokenUnits(
           cell,
           linkReferences: linkReferences,
         );
-        bodyCells.add(
-          buildRevealedCell(
-            tokenStartIndex: tokenStartIndex,
-            tokenUnits: tokenUnits,
-            isFirstRow: false,
-            isFirstColumn: col == 0,
-            isHeader: false,
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: _buildInlineMarkdown(
-                context,
-                cell,
-                tokenStartIndex: tokenStartIndex,
-                baseStyle: const TextStyle(fontSize: 13),
-                linkReferences: linkReferences,
-                footnoteNumbers: footnoteNumbers,
+        children.add(
+          SizedBox(
+            width: columnWidths[col],
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: isHeader
+                    ? headerBackground
+                    : (bodyRowIndex.isEven
+                          ? bodyBackground
+                          : alternateRowBackground),
+                border: Border(
+                  top: isHeader
+                      ? BorderSide(color: borderColor)
+                      : BorderSide.none,
+                  bottom: BorderSide(color: borderColor),
+                  left: col == 0
+                      ? BorderSide(color: borderColor)
+                      : BorderSide.none,
+                  right: BorderSide(color: borderColor),
+                ),
+              ),
+              child: buildCellPadding(
+                cell: cell,
+                tokenStartIndex: localTokenIndex,
+                baseStyle: isHeader
+                    ? theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: colorScheme.onSurface,
+                        ) ??
+                        TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          color: colorScheme.onSurface,
+                        )
+                    : theme.textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurface,
+                          height: 1.45,
+                        ) ??
+                        TextStyle(
+                          fontSize: 13,
+                          color: colorScheme.onSurface,
+                          height: 1.45,
+                        ),
               ),
             ),
           ),
         );
-        tokenStartIndex += tokenUnits;
+        localTokenIndex += tokenUnits;
       }
-      rows.add(TableRow(children: bodyCells));
+
+      final Widget rowWidget = SizedBox(
+        key: ValueKey<String>('markdown_table_row_$rowIndex'),
+        width: tableWidth,
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          ),
+        ),
+      );
+
+      if (!revealWithGate) {
+        return rowWidget;
+      }
+
+      return _TokenLayoutGate(
+        initialDelay: tokenScheduleOrigin == null
+            ? resolvedTokenStep * rowTokenStartIndex
+            : Duration.zero,
+        scheduledStart: tokenScheduleOrigin?.add(
+          resolvedTokenStep * rowTokenStartIndex,
+        ),
+        child: rowWidget,
+      );
     }
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Table(
-        defaultColumnWidth: const IntrinsicColumnWidth(),
-        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-        children: rows,
+    final int headerGateStartIndex = tokenStartIndex;
+    for (int col = 0; col < table.headers.length; col++) {
+      tokenStartIndex += _countAnimatedTokenUnits(
+        table.headers[col],
+        linkReferences: linkReferences,
+      );
+    }
+
+    final List<Widget> rowTables = <Widget>[
+      buildRow(
+        cells: table.headers,
+        rowTokenStartIndex: headerGateStartIndex,
+        isHeader: true,
+        bodyRowIndex: 0,
+        revealWithGate: false,
+        rowIndex: 0,
+      ),
+    ];
+    for (int rowIndex = 0; rowIndex < table.rows.length; rowIndex++) {
+      final List<String> row = table.rows[rowIndex];
+      final int rowGateStartIndex = tokenStartIndex;
+      for (int col = 0; col < row.length; col++) {
+        tokenStartIndex += _countAnimatedTokenUnits(
+          row[col],
+          linkReferences: linkReferences,
+        );
+      }
+      rowTables.add(
+        buildRow(
+          cells: row,
+          rowTokenStartIndex: rowGateStartIndex,
+          isHeader: false,
+          bodyRowIndex: rowIndex,
+          revealWithGate: true,
+          rowIndex: rowIndex + 1,
+        ),
+      );
+    }
+
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final double viewportMaxWidth = screenWidth >= 900 ? 560 : screenWidth;
+    final double frameWidth = tableWidth < viewportMaxWidth
+        ? tableWidth
+        : viewportMaxWidth;
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SizedBox(
+        key: const ValueKey<String>('markdown_table_frame'),
+        width: frameWidth,
+        child: DecoratedBox(
+          decoration: BoxDecoration(color: bodyBackground),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: SizedBox(
+                width: tableWidth,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: rowTables,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
+  }
+
+  List<double> _tableColumnWidths(
+    BuildContext context,
+    _ParsedTable table,
+  ) {
+    final int columnCount = table.headers.length;
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final double viewportMaxWidth = screenWidth >= 900 ? 560 : screenWidth;
+    const double horizontalPaddingPerCell = 28;
+    final List<double> preferredWidths =
+        List<double>.filled(columnCount, 112, growable: false);
+
+    for (int col = 0; col < columnCount; col++) {
+      double maxWidth = _estimatedTableCellWidth(table.headers[col]) +
+          horizontalPaddingPerCell;
+      for (final List<String> row in table.rows) {
+        if (col >= row.length) {
+          continue;
+        }
+        final double rowWidth =
+            _estimatedTableCellWidth(row[col]) + horizontalPaddingPerCell;
+        if (rowWidth > maxWidth) {
+          maxWidth = rowWidth;
+        }
+      }
+      preferredWidths[col] = maxWidth.clamp(112, 360);
+    }
+
+    final double totalPreferred = preferredWidths.fold<double>(
+      0,
+      (double sum, double width) => sum + width,
+    );
+    final double targetWidth = viewportMaxWidth.clamp(320, 560);
+    final bool shouldScaleDown = totalPreferred > targetWidth;
+    final double scale = shouldScaleDown ? targetWidth / totalPreferred : 1;
+    return List<double>.generate(columnCount, (int col) {
+      final double scaledWidth = shouldScaleDown
+          ? preferredWidths[col] * scale
+          : preferredWidths[col];
+      return scaledWidth.clamp(112, preferredWidths[col]);
+    }, growable: false);
+  }
+
+  double _estimatedTableCellWidth(String markdown) {
+    final String plain = markdown
+        .replaceAll(RegExp(r'!\[[^\]]*\]\([^)]+\)'), 'img')
+        .replaceAll(RegExp(r'\[[^\]]+\]\([^)]+\)'), 'link')
+        .replaceAll(RegExp(r'[`*_~]'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (plain.isEmpty) {
+      return 96;
+    }
+
+    final List<String> words = plain.split(' ');
+    int longestWord = 0;
+    for (final String word in words) {
+      if (word.length > longestWord) {
+        longestWord = word.length;
+      }
+    }
+    final int visibleChars = plain.length > 42 ? 42 : plain.length;
+    final double contentWidth = visibleChars * 7.6;
+    final double longestWordWidth = longestWord * 8.4;
+    final double estimated = contentWidth > longestWordWidth
+        ? contentWidth
+        : longestWordWidth;
+    return estimated.clamp(96, 332);
+  }
+
+  bool _tableHasRenderableCell(_ParsedTable table) {
+    for (final String cell in table.headers) {
+      if (cell.trim().isNotEmpty) {
+        return true;
+      }
+    }
+    for (final List<String> row in table.rows) {
+      for (final String cell in row) {
+        if (cell.trim().isNotEmpty) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 }

@@ -1,3 +1,35 @@
+## 0.3.4
+
+- Add an opt-in code block copy button via `showCodeBlockCopyButton`.
+- Add a native parser release gate that can be required in CI with
+  `REQUIRE_STREAMING_MARKDOWN_NATIVE=true`.
+- Add an Emscripten build script, source-digest asset verification, and web
+  loader for zero-config experimental Tree-sitter WASM parsing.
+- Add CI/release gates for committed WASM parser assets.
+- Allow web parse workers to use Tree-sitter WASM when the generated asset is
+  available, with pure-Dart fallback otherwise.
+- Promote Flutter web support as zero-config for package consumers by bundling
+  generated WASM parser assets as package assets.
+- Replace the example app with a real streaming Markdown chatbot for Ollama,
+  ChatGPT/OpenAI, Claude, Gemini, and Grok/xAI providers.
+- Add a static Flutter web chatbot demo for the documentation site.
+- Add inline image rendering customization, intrinsic-size handling, and
+  baseline alignment controls.
+- Add KaTeX-compatible LaTeX math rendering for inline `$...$` / `\(...\)` and
+  display `$$...$$` / `\[...\]` expressions using `flutter_math_fork`.
+- Improve chat example render sequencing so streamed Markdown waits for parser,
+  block reveal, and token animation settlement before allowing the next send.
+- Rework Markdown table rendering to support left-aligned viewport framing,
+  row-by-row reveal, more readable colors, and stable shared column widths on
+  web and native targets.
+- Raise the Dart SDK lower bound to `>=3.0.0` to match the math renderer
+  dependency and current Flutter web support.
+- Fix selection-on rendering so active selection uses text metrics that match
+  the rendered Markdown while idle selection keeps the same token effects as
+  selection-off.
+- Clean up iOS and macOS podspec release metadata.
+- Expand publishing guidance for native verification and parser benchmarks.
+
 ## 0.3.3
 
 - Add `AnimatedStreamingMarkdown.fromMarkdown` for complete Markdown snapshots.

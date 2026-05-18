@@ -136,6 +136,13 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
       }
       return lines.join('\n').trimRight();
     }
+    if (node.type == 'indented_code_block') {
+      return raw
+          .split('\n')
+          .map((String line) => line.replaceFirst(RegExp(r'^(?: {4}|\t)'), ''))
+          .join('\n')
+          .trimRight();
+    }
     return raw;
   }
 

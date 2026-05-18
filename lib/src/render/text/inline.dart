@@ -123,6 +123,20 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
         }
       }
 
+      final _LatexMatch? latex = _matchLatexAt(text, i);
+      if (latex != null) {
+        flushPlain();
+        tokens.add(
+          _InlineToken.latex(
+            latexExpression: latex.expression,
+            latexDisplay: latex.display,
+            sourceMarkdown: latex.sourceMarkdown,
+          ),
+        );
+        i = latex.end;
+        continue;
+      }
+
       final _DelimitedMatch? code = _matchDelimited(text, i, '`');
       if (code != null) {
         flushPlain();
@@ -266,6 +280,110 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
 
     flushPlain();
     return tokens;
+  }
+
+  _LatexMatch? _matchLatexAt(String text, int start) {
+    if (start > 0 && text.codeUnitAt(start - 1) == 92) {
+      return null;
+    }
+
+    if (text.startsWith(r'\(', start)) {
+      return _matchDelimitedLatex(
+        text,
+        start,
+        open: r'\(',
+        close: r'\)',
+        display: false,
+      );
+    }
+    if (text.startsWith(r'\[', start)) {
+      return _matchDelimitedLatex(
+        text,
+        start,
+        open: r'\[',
+        close: r'\]',
+        display: true,
+      );
+    }
+    if (text.startsWith(r'$$', start)) {
+      return _matchDelimitedLatex(
+        text,
+        start,
+        open: r'$$',
+        close: r'$$',
+        display: true,
+      );
+    }
+    if (text.codeUnitAt(start) == 36) {
+      if (start + 1 >= text.length || text.codeUnitAt(start + 1) == 36) {
+        return null;
+      }
+      final _LatexMatch? match = _matchDelimitedLatex(
+        text,
+        start,
+        open: r'$',
+        close: r'$',
+        display: false,
+      );
+      if (match == null) {
+        return null;
+      }
+      return match;
+    }
+    return null;
+  }
+
+  _LatexMatch? _matchDelimitedLatex(
+    String text,
+    int start, {
+    required String open,
+    required String close,
+    required bool display,
+  }) {
+    if (!text.startsWith(open, start)) {
+      return null;
+    }
+    final int contentStart = start + open.length;
+    final int closeStart = _findUnescapedDelimiter(text, close, contentStart);
+    if (closeStart == -1 || closeStart == contentStart) {
+      return null;
+    }
+    final int end = closeStart + close.length;
+    final String expression = text.substring(contentStart, closeStart).trim();
+    if (expression.isEmpty) {
+      return null;
+    }
+    return _LatexMatch(
+      expression: expression,
+      sourceMarkdown: text.substring(start, end),
+      display: display,
+      end: end,
+    );
+  }
+
+  int _findUnescapedDelimiter(String text, String delimiter, int start) {
+    int index = start;
+    while (index < text.length) {
+      final int found = text.indexOf(delimiter, index);
+      if (found == -1) {
+        return -1;
+      }
+      if (!_isEscaped(text, found)) {
+        return found;
+      }
+      index = found + delimiter.length;
+    }
+    return -1;
+  }
+
+  bool _isEscaped(String text, int index) {
+    int slashCount = 0;
+    int cursor = index - 1;
+    while (cursor >= 0 && text.codeUnitAt(cursor) == 92) {
+      slashCount += 1;
+      cursor -= 1;
+    }
+    return slashCount.isOdd;
   }
 
   _DelimitedMatch? _matchAnyDelimited(

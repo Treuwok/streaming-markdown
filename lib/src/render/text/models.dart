@@ -81,6 +81,20 @@ class _FootnoteReferenceMatch {
   final int end;
 }
 
+class _LatexMatch {
+  const _LatexMatch({
+    required this.expression,
+    required this.sourceMarkdown,
+    required this.display,
+    required this.end,
+  });
+
+  final String expression;
+  final String sourceMarkdown;
+  final bool display;
+  final int end;
+}
+
 class _FootnoteDefinition {
   const _FootnoteDefinition({required this.id, required this.body});
 
@@ -132,7 +146,9 @@ class _InlineToken {
     this.linkUrl,
   })  : altText = '',
         imageUrl = null,
-        footnoteReferenceId = null;
+        footnoteReferenceId = null,
+        latexExpression = null,
+        latexDisplay = false;
 
   const _InlineToken.image({
     required this.altText,
@@ -141,7 +157,9 @@ class _InlineToken {
   })  : text = '',
         style = const _InlineStyle(),
         linkUrl = null,
-        footnoteReferenceId = null;
+        footnoteReferenceId = null,
+        latexExpression = null,
+        latexDisplay = false;
 
   const _InlineToken.footnote({
     required this.footnoteReferenceId,
@@ -150,7 +168,20 @@ class _InlineToken {
         style = const _InlineStyle(),
         linkUrl = null,
         altText = '',
-        imageUrl = null;
+        imageUrl = null,
+        latexExpression = null,
+        latexDisplay = false;
+
+  const _InlineToken.latex({
+    required this.latexExpression,
+    required this.latexDisplay,
+    required this.sourceMarkdown,
+  })  : text = '',
+        style = const _InlineStyle(),
+        linkUrl = null,
+        altText = '',
+        imageUrl = null,
+        footnoteReferenceId = null;
 
   final String text;
   final _InlineStyle style;
@@ -158,13 +189,16 @@ class _InlineToken {
   final String altText;
   final String? imageUrl;
   final String? footnoteReferenceId;
+  final String? latexExpression;
+  final bool latexDisplay;
   final String sourceMarkdown;
 
   bool get isImage => imageUrl != null;
   bool get isFootnoteReference => footnoteReferenceId != null;
+  bool get isLatex => latexExpression != null;
 
   _InlineToken withLink(String url, {required String sourceMarkdown}) {
-    if (isImage || isFootnoteReference) {
+    if (isImage || isFootnoteReference || isLatex) {
       return this;
     }
     return _InlineToken.text(

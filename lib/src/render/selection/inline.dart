@@ -38,6 +38,15 @@ extension _StreamingMarkdownSelectionInlineBuilder
         );
         continue;
       }
+      if (token.isLatex) {
+        pieces.add(
+          _MarkdownSelectionPiece(
+            plainText: token.sourceMarkdown,
+            markdownText: token.sourceMarkdown,
+          ),
+        );
+        continue;
+      }
       pieces.add(
         _MarkdownSelectionPiece(
           plainText: token.text,

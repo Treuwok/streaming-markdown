@@ -1,13 +1,13 @@
 Pod::Spec.new do |s|
   s.name             = 'animated_streaming_markdown'
-  s.version          = '0.0.1'
-  s.summary          = 'Flutter FFI plugin exposing tree-sitter markdown language.'
+  s.version          = '0.3.4'
+  s.summary          = 'Flutter streaming Markdown parser and renderer.'
   s.description      = <<-DESC
-Flutter FFI plugin exposing tree-sitter markdown language.
+Flutter markdown streaming package with native Tree-sitter parser bindings.
                        DESC
-  s.homepage         = 'http://example.com'
+  s.homepage         = 'https://samnn.dev'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'hider152' => 'hider152@example.com' }
+  s.author           = { 'samnn152' => 'https://github.com/samnn152' }
 
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*'

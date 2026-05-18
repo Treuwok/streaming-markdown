@@ -10,6 +10,30 @@
   --ifm-navbar-height: 64px;
 }
 
+.chat-demo-frame {
+  width: 100%;
+  min-height: 760px;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 8px;
+  background: var(--ifm-background-color);
+}
+
+.chat-demo-video {
+  width: 100%;
+  max-width: 960px;
+  display: block;
+  margin: 1.5rem 0;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 8px;
+  background: var(--ifm-background-color);
+}
+
+@media (max-width: 768px) {
+  .chat-demo-frame {
+    min-height: 680px;
+  }
+}
+
 [data-theme='dark'] {
   --ifm-color-primary: #60a5fa;
   --ifm-color-primary-dark: #3b82f6;
