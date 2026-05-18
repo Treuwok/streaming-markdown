@@ -17,6 +17,11 @@
   baseline alignment controls.
 - Add KaTeX-compatible LaTeX math rendering for inline `$...$` / `\(...\)` and
   display `$$...$$` / `\[...\]` expressions using `flutter_math_fork`.
+- Improve chat example render sequencing so streamed Markdown waits for parser,
+  block reveal, and token animation settlement before allowing the next send.
+- Rework Markdown table rendering to support left-aligned viewport framing,
+  row-by-row reveal, more readable colors, and stable shared column widths on
+  web and native targets.
 - Raise the Dart SDK lower bound to `>=3.0.0` to match the math renderer
   dependency and current Flutter web support.
 - Fix selection-on rendering so active selection uses text metrics that match

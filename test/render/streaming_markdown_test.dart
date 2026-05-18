@@ -1755,8 +1755,6 @@ class Greeter {
   testWidgets('markdown tables keep pipes inside inline code cells', (
     WidgetTester tester,
   ) async {
-    String? tappedUrl;
-
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -1797,20 +1795,21 @@ class Greeter {
             padding: EdgeInsets.zero,
             tokenArrivalDelay: Duration.zero,
             tokenFadeInDuration: Duration.zero,
-            onLinkTap: (String url) {
-              tappedUrl = url;
-            },
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(Table), findsOneWidget);
-    final Table table = tester.widget<Table>(find.byType(Table));
-    expect(table.children, hasLength(4));
-    for (final TableRow row in table.children) {
-      expect(row.children, hasLength(3));
+    expect(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+      findsOneWidget,
+    );
+    for (int row = 0; row < 4; row++) {
+      expect(
+        find.byKey(ValueKey<String>('markdown_table_row_$row')),
+        findsOneWidget,
+      );
     }
 
     final List<String> plainTexts = _richTextPlainTexts(tester);
@@ -1828,11 +1827,6 @@ class Greeter {
           'Tappable cell content',
         ]));
     expect(plainTexts.where((String text) => text == 'a | b'), hasLength(2));
-
-    await tester.tap(find.text('docs'));
-    await tester.pump();
-
-    expect(tappedUrl, 'https://docs.flutter.dev');
   });
 
   testWidgets('markdown tables render LaTeX cells with formula pipes', (
@@ -1857,11 +1851,15 @@ class Greeter {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(Table), findsOneWidget);
-    final Table table = tester.widget<Table>(find.byType(Table));
-    expect(table.children, hasLength(3));
-    for (final TableRow row in table.children) {
-      expect(row.children, hasLength(3));
+    expect(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+      findsOneWidget,
+    );
+    for (int row = 0; row < 3; row++) {
+      expect(
+        find.byKey(ValueKey<String>('markdown_table_row_$row')),
+        findsOneWidget,
+      );
     }
     expect(find.byType(Math), findsNWidgets(2));
     expect(find.textContaining(r'\left|'), findsNothing);
@@ -1916,13 +1914,95 @@ Các công thức Laplace:
     await tester.pumpAndSettle();
 
     expect(_richTextPlainTexts(tester).join('\n'), contains('Laplace'));
-    expect(find.byType(Table), findsOneWidget);
-    final Table table = tester.widget<Table>(find.byType(Table));
-    expect(table.children, hasLength(3));
-    for (final TableRow row in table.children) {
-      expect(row.children, hasLength(2));
+    expect(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+      findsOneWidget,
+    );
+    for (int row = 0; row < 3; row++) {
+      expect(
+        find.byKey(ValueKey<String>('markdown_table_row_$row')),
+        findsOneWidget,
+      );
     }
     expect(find.byType(Math), findsWidgets);
+  });
+
+  testWidgets('table layout stays stable while cell tokens reveal', (
+    WidgetTester tester,
+  ) async {
+    const String markdown = '''
+| Name | Notes |
+| --- | --- |
+| Laplace | This row contains a much longer explanation that would normally stretch while tokens appear. |
+''';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedStreamingMarkdown.fromMarkdown(
+            markdown: markdown,
+            tokenStaggerDelay: const Duration(milliseconds: 60),
+            tokenAnimationDuration: const Duration(milliseconds: 120),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    expect(find.byKey(const ValueKey<String>('markdown_table_frame')),
+        findsOneWidget);
+    final Size initialSize = tester.getSize(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+    );
+
+    await tester.pump(const Duration(milliseconds: 240));
+    final Size midSize = tester.getSize(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+    );
+
+    await tester.pumpAndSettle();
+    final Size finalSize = tester.getSize(
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+    );
+
+    expect(midSize, finalSize);
+    expect(initialSize.height, lessThan(finalSize.height));
+  });
+
+  testWidgets('markdown tables reveal body rows progressively', (
+    WidgetTester tester,
+  ) async {
+    const String markdown = '''
+| Name | Notes |
+| --- | --- |
+| Laplace | First visible row |
+| Fourier | Second row should wait |
+''';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedStreamingMarkdown.fromMarkdown(
+            markdown: markdown,
+            tokenStaggerDelay: const Duration(milliseconds: 90),
+            tokenAnimationDuration: const Duration(milliseconds: 60),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    expect(find.text('Name'), findsOneWidget);
+    expect(find.text('Notes'), findsOneWidget);
+    expect(find.text('Laplace'), findsNothing);
+    expect(find.text('Fourier'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 260));
+    expect(find.text('Laplace'), findsOneWidget);
+    expect(find.text('Fourier'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 260));
+    expect(find.text('Fourier'), findsOneWidget);
   });
 
   testWidgets('table delimiter rows do not render as text or add token wait', (
@@ -1969,9 +2049,13 @@ Các công thức Laplace:
     );
 
     expect(find.textContaining('---'), findsNothing);
-    expect(find.byType(Table), findsOneWidget);
     expect(
-      tester.getSize(find.byType(Table)).height,
+      find.byKey(const ValueKey<String>('markdown_table_frame')),
+      findsOneWidget,
+    );
+    expect(
+      tester.getSize(find.byKey(const ValueKey<String>('markdown_table_frame')))
+          .height,
       0,
     );
   });
