@@ -17,6 +17,7 @@ streaming_markdown_sha256() {
 
 streaming_markdown_wasm_source_files() {
   local root_dir="$1"
+  local prefix="$root_dir/"
   find \
     "$root_dir/packages/tree-sitter/lib/include" \
     "$root_dir/packages/tree-sitter/lib/src" \
@@ -27,6 +28,7 @@ streaming_markdown_wasm_source_files() {
     "$root_dir/src" \
     -type f \
     \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
+    | sed "s#^$prefix##" \
     | LC_ALL=C sort
 }
 
@@ -34,7 +36,9 @@ streaming_markdown_wasm_source_digest() {
   local root_dir="$1"
   streaming_markdown_wasm_source_files "$root_dir" \
     | while IFS= read -r file; do
-        printf '%s  %s\n' "$(streaming_markdown_sha256 "$file")" "$file"
+        printf '%s  %s\n' \
+          "$(streaming_markdown_sha256 "$root_dir/$file")" \
+          "$file"
       done \
     | if command -v shasum >/dev/null 2>&1; then
         shasum -a 256
