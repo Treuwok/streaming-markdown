@@ -10,7 +10,7 @@ extension _StreamingMarkdownSelectionProjectionBuilder
     final List<_MarkdownSelectionSegment> segments =
         <_MarkdownSelectionSegment>[];
     for (final MarkdownRenderNode block in blocks) {
-      final String raw = _normalizedRaw(block.raw);
+      final String raw = _selectionRaw(block.raw);
       switch (block.type) {
         case 'atx_heading':
         case 'setext_heading':
@@ -25,7 +25,7 @@ extension _StreamingMarkdownSelectionProjectionBuilder
         case 'paragraph':
           segments.add(
             _inlineSelectionSegment(
-              _paragraphText(block).replaceAll('\n', ' '),
+              _selectionParagraphText(block),
               markdownText: raw,
               linkReferences: linkReferences,
               footnoteNumbers: footnoteNumbers,
@@ -105,6 +105,18 @@ extension _StreamingMarkdownSelectionProjectionBuilder
       }
     }
     return _MarkdownSelectionProjection(segments);
+  }
+
+  String _selectionParagraphText(MarkdownRenderNode node) {
+    final String raw = _selectionRaw(node.raw);
+    if (raw.trim().isNotEmpty) {
+      return raw.replaceAll('\n', ' ');
+    }
+    return node.content;
+  }
+
+  String _selectionRaw(String raw) {
+    return raw.replaceAll('\r', '').replaceFirst(RegExp(r'\n+$'), '');
   }
 
   _MarkdownSelectionSegment _tableSelectionSegment(

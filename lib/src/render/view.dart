@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/rendering.dart' show SelectedContent, SelectionStatus;
-import 'package:flutter/scheduler.dart';
+import 'package:flutter/rendering.dart' show SelectedContent;
 import 'package:flutter/services.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:html/dom.dart' as html_dom;
 import 'package:html/parser.dart' as html_parser;
 import 'dart:async';
 import 'dart:collection';
+import 'selection/web_copy_interceptor_stub.dart'
+    if (dart.library.html) 'selection/web_copy_interceptor_web.dart'
+    as web_copy;
 
+import '../copy/clipboard_handler.dart';
+import '../copy/selection_strategy.dart';
 import '../model/render_node.dart';
 import '../worker/parse_worker_stub.dart'
     if (dart.library.ffi) '../worker/parse_worker.dart';
@@ -38,6 +42,9 @@ part 'selection/area.dart';
 part 'selection/model.dart';
 part 'selection/pieces.dart';
 part 'selection/overlay.dart';
+part '../copy/plain_text_extractor.dart';
+part '../copy/raw_markdown_extractor.dart';
+part '../copy/html_converter.dart';
 part 'animation/sequence.dart';
 part 'animation/sequence_state.dart';
 part 'animation/sequence_tokens.dart';
@@ -81,6 +88,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     bool showTokenDebugColors = false,
     bool showCodeBlockCopyButton = false,
     bool enableSelection = false,
+    SelectionStrategy selectionStrategy = SelectionStrategy.rich,
     StreamingMarkdownThemeData theme = const StreamingMarkdownThemeData(),
     AnimatedMarkdownBlockBuilder? blockBuilder,
     AnimatedMarkdownImageBuilder? imageBuilder,
@@ -106,6 +114,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
           debugTokenHighlight: showTokenDebugColors,
           showCodeBlockCopyButton: showCodeBlockCopyButton,
           enableTextSelection: enableSelection,
+          selectionStrategy: selectionStrategy,
           markdownTheme: theme,
           customBlockBuilder: blockBuilder,
           customImageBuilder: imageBuilder,
@@ -145,6 +154,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     bool showTokenDebugColors = false,
     bool showCodeBlockCopyButton = false,
     bool enableSelection = false,
+    SelectionStrategy selectionStrategy = SelectionStrategy.rich,
     StreamingMarkdownThemeData theme = const StreamingMarkdownThemeData(),
     AnimatedMarkdownBlockBuilder? blockBuilder,
     AnimatedMarkdownImageBuilder? imageBuilder,
@@ -176,6 +186,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
       showTokenDebugColors: showTokenDebugColors,
       showCodeBlockCopyButton: showCodeBlockCopyButton,
       enableSelection: enableSelection,
+      selectionStrategy: selectionStrategy,
       theme: theme,
       blockBuilder: blockBuilder,
       imageBuilder: imageBuilder,
@@ -223,6 +234,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     this.debugTokenHighlight = false,
     this.showCodeBlockCopyButton = false,
     this.enableTextSelection = false,
+    this.selectionStrategy = SelectionStrategy.rich,
     this.markdownTheme = const StreamingMarkdownThemeData(),
     this.customBlockBuilder,
     this.customImageBuilder,
@@ -287,6 +299,10 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// Enables selectable text and markdown-aware copy behavior.
   final bool enableTextSelection;
 
+  /// Controls whether copied selections become plain text, raw markdown,
+  /// or rich HTML with a plain-text fallback.
+  final SelectionStrategy selectionStrategy;
+
   /// Theme data for markdown block styling.
   final StreamingMarkdownThemeData markdownTheme;
 
@@ -344,6 +360,106 @@ class StreamingMarkdownRenderView extends StatelessWidget {
       footnoteNumbers: footnoteNumbers,
     );
     return projection.markdownForSelectedPlainText(selectedPlainText);
+  }
+
+  @visibleForTesting
+  static String debugPlainTextForSelectedPlainText({
+    required List<MarkdownRenderNode> nodes,
+    required String selectedPlainText,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final StreamingMarkdownRenderView view = StreamingMarkdownRenderView(
+      nodes: nodes,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    final List<MarkdownRenderNode> blocks =
+        view._collectRenderableBlocks(nodes);
+    final Map<String, String> linkReferences =
+        view._extractLinkReferences(nodes);
+    final Map<String, int> footnoteNumbers =
+        view._extractFootnoteNumbers(nodes);
+    final _MarkdownSelectionProjection projection =
+        view._buildSelectionProjection(
+      blocks,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    );
+    return projection.plainTextForSelectedPlainText(selectedPlainText);
+  }
+
+  @visibleForTesting
+  static String debugFullPlainText({
+    required List<MarkdownRenderNode> nodes,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final StreamingMarkdownRenderView view = StreamingMarkdownRenderView(
+      nodes: nodes,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    final List<MarkdownRenderNode> blocks =
+        view._collectRenderableBlocks(nodes);
+    final Map<String, String> linkReferences =
+        view._extractLinkReferences(nodes);
+    final Map<String, int> footnoteNumbers =
+        view._extractFootnoteNumbers(nodes);
+    final _MarkdownSelectionProjection projection =
+        view._buildSelectionProjection(
+      blocks,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    );
+    return projection.segments
+        .where(
+          (_MarkdownSelectionSegment segment) =>
+              segment.plainText.isNotEmpty || segment.markdownText.isNotEmpty,
+        )
+        .map((_MarkdownSelectionSegment segment) => segment.plainText)
+        .join('\n\n');
+  }
+
+  @visibleForTesting
+  static String debugHtmlForSelectedPlainText({
+    required List<MarkdownRenderNode> nodes,
+    required String selectedPlainText,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final String markdown = debugMarkdownForSelectedPlainText(
+      nodes: nodes,
+      selectedPlainText: selectedPlainText,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    if (markdown.isEmpty) {
+      return '';
+    }
+    return _selectedMarkdownToHtml(
+      markdown,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+  }
+
+  @visibleForTesting
+  static String debugFullHtml({
+    required List<MarkdownRenderNode> nodes,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final StreamingMarkdownRenderView view = StreamingMarkdownRenderView(
+      nodes: nodes,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    final List<MarkdownRenderNode> blocks =
+        view._collectRenderableBlocks(nodes);
+    final Map<String, String> linkReferences =
+        view._extractLinkReferences(nodes);
+    final Map<String, int> footnoteNumbers =
+        view._extractFootnoteNumbers(nodes);
+    final _MarkdownHtmlSelectionConverter converter =
+        _MarkdownHtmlSelectionConverter(
+      view: view,
+      blocks: blocks,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    );
+    return converter.convert();
   }
 
   @override
@@ -406,6 +522,8 @@ class StreamingMarkdownRenderView extends StatelessWidget {
         linkReferences: linkReferences,
         footnoteNumbers: footnoteNumbers,
       ),
+      selectionStrategy: selectionStrategy,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
       child: content,
     );
   }

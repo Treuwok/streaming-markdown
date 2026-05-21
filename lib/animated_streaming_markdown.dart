@@ -50,6 +50,7 @@ export 'src/worker/parse_worker_stub.dart'
 
 /// Flutter markdown rendering widgets with streaming token animation support.
 export 'src/render/view.dart';
+export 'src/copy/selection_strategy.dart';
 
 /// Tree-sitter markdown parser API returning full syntax trees.
 export 'src/parser/tree_sitter_markdown_parser_stub.dart'
