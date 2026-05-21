@@ -45,6 +45,7 @@ class MarkdownCasesDemoPage extends StatefulWidget {
 }
 
 class _MarkdownCasesDemoPageState extends State<MarkdownCasesDemoPage> {
+  static const int _defaultTokenAnimationIndex = 4;
   static const int _streamChunkLength = 28;
   static const Duration _streamChunkDelay = Duration(milliseconds: 110);
 
@@ -59,7 +60,7 @@ class _MarkdownCasesDemoPageState extends State<MarkdownCasesDemoPage> {
   bool _renderPaused = false;
   bool _showSource = false;
   bool _debugTokens = false;
-  int _selectedTokenAnimation = 0;
+  int _selectedTokenAnimation = _defaultTokenAnimationIndex;
   String? _error;
   int _streamedCharacters = 0;
   int _totalCharacters = 0;
@@ -1163,11 +1164,21 @@ final List<_TokenAnimationPreset> _tokenAnimationPresets =
       _TokenAnimationPreset(
         name: 'Rotate in',
         builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
-          final double t = Curves.easeOutQuart.transform(token.value);
-          return Transform.rotate(
-            angle: (1 - t) * -0.16,
-            alignment: Alignment.bottomLeft,
-            child: Opacity(opacity: token.value, child: token.child),
+          final double t = Curves.easeOutBack.transform(token.value);
+          return Opacity(
+            opacity: Curves.easeOut.transform(token.value),
+            child: Transform.translate(
+              offset: Offset((1 - t) * -10, 0),
+              child: Transform.rotate(
+                angle: (1 - t) * -0.42,
+                alignment: Alignment.bottomLeft,
+                child: Transform.scale(
+                  scale: 0.94 + (0.06 * t),
+                  alignment: Alignment.bottomLeft,
+                  child: token.child,
+                ),
+              ),
+            ),
           );
         },
       ),

@@ -25,6 +25,8 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
+  static const int _defaultTokenAnimationPresetIndex = 4;
+
   final TextEditingController _messageController = TextEditingController();
   final TextEditingController _modelController = TextEditingController();
   final TextEditingController _baseUrlController = TextEditingController();
@@ -37,7 +39,8 @@ class _ChatPageState extends State<ChatPage> {
   double _firstNodeDelayMs = 0;
   double _animationDurationMs = 150;
   Curve _animationCurve = Curves.easeOut;
-  _TokenAnimationPreset _tokenAnimationPreset = _tokenAnimationPresets.first;
+  _TokenAnimationPreset _tokenAnimationPreset =
+      _tokenAnimationPresets[_defaultTokenAnimationPresetIndex];
   SelectionStrategy _selectionStrategy = SelectionStrategy.rich;
 
   @override
@@ -311,11 +314,21 @@ final List<_TokenAnimationPreset> _tokenAnimationPresets =
       _TokenAnimationPreset(
         name: 'Rotate in',
         builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
-          final double t = Curves.easeOutQuart.transform(token.value);
-          return Transform.rotate(
-            angle: (1 - t) * -0.16,
-            alignment: Alignment.bottomLeft,
-            child: Opacity(opacity: token.value, child: token.child),
+          final double t = Curves.easeOutBack.transform(token.value);
+          return Opacity(
+            opacity: Curves.easeOut.transform(token.value),
+            child: Transform.translate(
+              offset: Offset((1 - t) * -10, 0),
+              child: Transform.rotate(
+                angle: (1 - t) * -0.42,
+                alignment: Alignment.bottomLeft,
+                child: Transform.scale(
+                  scale: 0.94 + (0.06 * t),
+                  alignment: Alignment.bottomLeft,
+                  child: token.child,
+                ),
+              ),
+            ),
           );
         },
       ),
