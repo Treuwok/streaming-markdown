@@ -1,0 +1,159 @@
+title: Streaming Markdown fixtures
+tags:
+  - parser
+  - renderer
+draft: false
+
+Front matter
+
+Front matter is rendered as a metadata block when it appears at the top of the document.
+
+
+
+Thematic breaks render as horizontal dividers.
+
+
+
+Underscore breaks are supported too.
+
+
+
+Heading level 1
+
+Heading level 2
+
+Heading level 3
+
+Heading level 4
+
+Heading level 5
+
+Heading level 6
+
+Setext heading level 1
+
+Setext heading level 2
+
+Paragraph text keeps normal Markdown prose readable while streaming. A newline inside the same paragraph remains part of the rendered text.
+
+
+
+Inline formatting
+
+This paragraph includes bold, bold with underscores, italic, italic with underscores, bold italic, bold italic underscores, strikethrough, and inline code.
+
+Nested emphasis also works: bold text with italic inside and code.
+
+Unclosed delimiters can render during streaming: **bold while the chunk is still arriving.
+
+
+
+Links and references
+
+Inline links render as tappable spans: OpenAI.
+
+Autolinks render from angle brackets: https://github.com.
+
+Full reference links work with definitions: Flutter docs.
+
+Collapsed references use the label as the key: Dart.
+
+Shortcut references work too: pub.dev.
+
+[flutter]: https://docs.flutter.dev
+
+[dart]: https://dart.dev
+
+[pub.dev]: https://pub.dev
+
+
+
+Images
+
+[image: Remote demo image]
+
+Inline images inside a paragraph are represented inline: before [image: small marker] after.
+
+
+
+Lists and tasks
+
+Unordered item
+Item with inline formatting
+Nested unordered item
+Another nested item
+Third level item
+
+Ordered item
+Ordered item starting from the source number
+Nested ordered item
+Another nested ordered item
+
+Completed task
+Open task
+Uppercase completed task
+
+
+
+Block quotes and callouts
+
+A normal block quote keeps quoted prose visually separate.
+It can span more than one line.
+
+[!NOTE] Note
+Notes render with an info treatment.
+
+[!TIP] Tip
+Tips render with a success treatment.
+
+[!IMPORTANT] Important
+Important callouts have their own accent.
+
+[!WARNING] Warning
+Warnings render with a warning accent.
+
+[!CAUTION] Caution
+Caution callouts render with an error accent.
+
+
+
+Code blocks
+
+class Greeter {
+  const Greeter(this.name);
+
+  final String name;
+
+  String call() => 'Hello, $name';
+}
+
+{
+  "streaming": true,
+  "blocks": ["paragraph", "code", "table"]
+}
+
+    final value = 'Indented code block';     print(value);
+
+
+
+Tables
+
+CaseMarkdownRendered behaviorInline codea | bKeeps pipe inside codeEscaped pipea | bKeeps escaped separatorLinkdocsTappable cell content
+
+NameStatusNotesAlphaReadyBasic cellsBetaStreamingFormatted cell
+
+
+
+Footnotes
+
+Streaming render can show footnote references inline.1
+
+Multiple references can point at separate definitions.2
+
+parser: The parser emits footnote definition nodes.
+
+renderer: The renderer displays definitions as compact rows.
+
+
+
+HTML block
