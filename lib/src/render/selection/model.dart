@@ -5,6 +5,171 @@ class _MarkdownSelectionProjection {
 
   final List<_MarkdownSelectionSegment> segments;
 
+  String get fullPlainText {
+    final StringBuffer plain = StringBuffer();
+    for (int i = 0; i < segments.length; i++) {
+      if (i > 0) {
+        plain.write('\n\n');
+      }
+      plain.write(segments[i].plainText);
+    }
+    return plain.toString();
+  }
+
+  _MarkdownSelectionRange? findRangeForSelectedPlainText(
+    String selectedPlainText, {
+    int? preferredStart,
+  }) {
+    final String selected = selectedPlainText.replaceAll('\r', '');
+    if (selected.isEmpty) {
+      return null;
+    }
+    final String document = fullPlainText;
+    if (document.isEmpty || selected.length > document.length) {
+      return null;
+    }
+
+    int bestStart = -1;
+    int searchFrom = 0;
+    while (searchFrom <= document.length) {
+      final int hit = document.indexOf(selected, searchFrom);
+      if (hit < 0) {
+        break;
+      }
+      if (preferredStart == null) {
+        bestStart = hit;
+        break;
+      }
+      if (bestStart < 0 ||
+          (hit - preferredStart).abs() < (bestStart - preferredStart).abs()) {
+        bestStart = hit;
+      }
+      searchFrom = hit + 1;
+    }
+    if (bestStart < 0) {
+      return null;
+    }
+    return _MarkdownSelectionRange(
+      start: bestStart,
+      end: bestStart + selected.length,
+    );
+  }
+
+  String plainTextForRange(_MarkdownSelectionRange range) {
+    final StringBuffer plain = StringBuffer();
+    final List<_MarkdownSelectionSegmentRange> ranges =
+        <_MarkdownSelectionSegmentRange>[];
+    for (int i = 0; i < segments.length; i++) {
+      if (i > 0) {
+        plain.write('\n\n');
+      }
+      final int start = plain.length;
+      plain.write(segments[i].plainText);
+      ranges.add(
+        _MarkdownSelectionSegmentRange(
+          segment: segments[i],
+          start: start,
+          end: plain.length,
+        ),
+      );
+    }
+
+    final int selectionStart = range.start.clamp(0, plain.length);
+    final int selectionEnd = range.end.clamp(selectionStart, plain.length);
+    final StringBuffer out = StringBuffer();
+    for (final _MarkdownSelectionSegmentRange segmentRange in ranges) {
+      final _MarkdownSelectionSegment segment = segmentRange.segment;
+      final bool isEmptySegment = segmentRange.start == segmentRange.end;
+      final bool intersects = isEmptySegment
+          ? selectionStart < segmentRange.start &&
+              selectionEnd > segmentRange.start
+          : selectionStart < segmentRange.end &&
+              selectionEnd > segmentRange.start;
+      if (!intersects) {
+        continue;
+      }
+      final String piece = isEmptySegment
+          ? ''
+          : segment.plainText.substring(
+              (selectionStart - segmentRange.start).clamp(
+                0,
+                segment.plainText.length,
+              ),
+              (selectionEnd - segmentRange.start).clamp(
+                0,
+                segment.plainText.length,
+              ),
+            );
+      if (piece.isEmpty) {
+        continue;
+      }
+      if (out.isNotEmpty) {
+        out.write('\n\n');
+      }
+      out.write(piece);
+    }
+    return out.toString();
+  }
+
+  String markdownForRange(_MarkdownSelectionRange range) {
+    final StringBuffer plain = StringBuffer();
+    final List<_MarkdownSelectionSegmentRange> ranges =
+        <_MarkdownSelectionSegmentRange>[];
+    for (int i = 0; i < segments.length; i++) {
+      if (i > 0) {
+        plain.write('\n\n');
+      }
+      final int start = plain.length;
+      plain.write(segments[i].plainText);
+      ranges.add(
+        _MarkdownSelectionSegmentRange(
+          segment: segments[i],
+          start: start,
+          end: plain.length,
+        ),
+      );
+    }
+
+    final int selectionStart = range.start.clamp(0, plain.length);
+    final int selectionEnd = range.end.clamp(selectionStart, plain.length);
+    final StringBuffer out = StringBuffer();
+
+    for (final _MarkdownSelectionSegmentRange segmentRange in ranges) {
+      final _MarkdownSelectionSegment segment = segmentRange.segment;
+      final bool isEmptySegment = segmentRange.start == segmentRange.end;
+      final bool intersects = isEmptySegment
+          ? selectionStart < segmentRange.start &&
+              selectionEnd > segmentRange.start
+          : selectionStart < segmentRange.end &&
+              selectionEnd > segmentRange.start;
+      if (!intersects) {
+        continue;
+      }
+
+      final String markdownText = isEmptySegment
+          ? segment.markdownText
+          : segment.markdownForPlainRange(
+              (selectionStart - segmentRange.start).clamp(
+                0,
+                segment.plainText.length,
+              ),
+              (selectionEnd - segmentRange.start).clamp(
+                0,
+                segment.plainText.length,
+              ),
+            );
+      if (markdownText.isEmpty) {
+        continue;
+      }
+      if (out.isNotEmpty) {
+        out.write('\n\n');
+      }
+      out.write(markdownText);
+    }
+
+    return out.toString();
+  }
+
   String plainTextForSelectedPlainText(String selectedPlainText) {
     final String selected = selectedPlainText.replaceAll('\r', '');
     if (selected.isEmpty) {
@@ -414,6 +579,13 @@ class _MarkdownSelectionProjection {
 
     return out.toString();
   }
+}
+
+class _MarkdownSelectionRange {
+  const _MarkdownSelectionRange({required this.start, required this.end});
+
+  final int start;
+  final int end;
 }
 
 class _NormalizedDocumentSelectionMatch {

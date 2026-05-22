@@ -206,6 +206,31 @@ void main() {
       expect(copied, '# H1\n\nBody paragraph');
     });
 
+    test('range-based selection can target repeated plain text deterministically',
+        () {
+      final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+        _node('paragraph', 'first **repeat** marker', startByte: 0),
+        _node('paragraph', 'second **repeat** marker', startByte: 32),
+      ];
+
+      final String fullPlain = StreamingMarkdownRenderView.debugFullPlainText(
+        nodes: nodes,
+      );
+      final int first = fullPlain.indexOf('repeat');
+      final int second = fullPlain.indexOf('repeat', first + 1);
+      expect(first, isNonNegative);
+      expect(second, greaterThan(first));
+
+      final String copied =
+          StreamingMarkdownRenderView.debugMarkdownForSelectionRange(
+        nodes: nodes,
+        selectionStart: second,
+        selectionEnd: second + 'repeat'.length,
+      );
+
+      expect(copied, '**repeat**');
+    });
+
     test('table selection maps flattened cell text back to markdown table', () {
       const String firstTable = '| Case | Markdown | Rendered behavior |\n'
           '| :--- | :------: | ---------------: |\n'

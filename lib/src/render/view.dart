@@ -438,6 +438,34 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   }
 
   @visibleForTesting
+  static String debugMarkdownForSelectionRange({
+    required List<MarkdownRenderNode> nodes,
+    required int selectionStart,
+    required int selectionEnd,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final StreamingMarkdownRenderView view = StreamingMarkdownRenderView(
+      nodes: nodes,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    final List<MarkdownRenderNode> blocks =
+        view._collectRenderableBlocks(nodes);
+    final Map<String, String> linkReferences =
+        view._extractLinkReferences(nodes);
+    final Map<String, int> footnoteNumbers =
+        view._extractFootnoteNumbers(nodes);
+    final _MarkdownSelectionProjection projection =
+        view._buildSelectionProjection(
+      blocks,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    );
+    return projection.markdownForRange(
+      _MarkdownSelectionRange(start: selectionStart, end: selectionEnd),
+    );
+  }
+
+  @visibleForTesting
   static String debugFullHtml({
     required List<MarkdownRenderNode> nodes,
     bool allowUnclosedInlineDelimiters = false,

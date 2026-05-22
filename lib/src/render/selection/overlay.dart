@@ -74,10 +74,16 @@ class _SelectableInlineTextOverlayState
         final String imageText =
             token.altText.isEmpty ? '[image]' : '[image: ${token.altText}]';
         spans.add(
-          TextSpan(
-            text: imageText,
-            style: _selectionOverlayStyle(
-              widget.baseStyle.copyWith(fontStyle: FontStyle.italic),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Text(
+                imageText,
+                style: _selectionOverlayStyle(
+                  widget.baseStyle.copyWith(fontStyle: FontStyle.italic),
+                ),
+              ),
             ),
           ),
         );
@@ -92,12 +98,19 @@ class _SelectableInlineTextOverlayState
         final String label =
             footnoteNumber?.toString() ?? token.footnoteReferenceId!;
         spans.add(
-          TextSpan(
-            text: label,
-            style: _selectionOverlayStyle(
-              widget.baseStyle.copyWith(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
+          WidgetSpan(
+            alignment: PlaceholderAlignment.aboveBaseline,
+            baseline: TextBaseline.alphabetic,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 1),
+              child: Text(
+                label,
+                style: _selectionOverlayStyle(
+                  widget.baseStyle.copyWith(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ),
           ),
@@ -126,7 +139,21 @@ class _SelectableInlineTextOverlayState
         style = style.copyWith(decoration: TextDecoration.none);
       }
       if (token.style.code) {
-        style = style.copyWith(fontFamily: 'monospace', fontSize: 12);
+        final TextStyle inlineCodeStyle = _selectionOverlayStyle(
+          widget.baseStyle.copyWith(fontFamily: 'monospace', fontSize: 12),
+        );
+        spans.add(
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(4)),
+              child: Text(token.text, style: inlineCodeStyle),
+            ),
+          ),
+        );
+        continue;
       }
       if (token.linkUrl != null && token.linkUrl!.isNotEmpty) {
         style = style.copyWith(decoration: TextDecoration.none);

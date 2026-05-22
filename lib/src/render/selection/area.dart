@@ -19,6 +19,8 @@ class _MarkdownSelectionArea extends StatefulWidget {
 
 class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
   SelectedContent? _selectedContent;
+  _MarkdownSelectionRange? _selectionRange;
+  String _lastSelectedPlainText = '';
   late final FocusNode _focusNode = FocusNode(debugLabel: 'markdown-selection');
 
   @override
@@ -35,6 +37,19 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
     web_copy.WebCopyInterceptor.detach(focusNode: _focusNode);
     _focusNode.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MarkdownSelectionArea oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_lastSelectedPlainText.isEmpty) {
+      return;
+    }
+    final int? preferredStart = _selectionRange?.start;
+    _selectionRange = widget.projection.findRangeForSelectedPlainText(
+      _lastSelectedPlainText,
+      preferredStart: preferredStart,
+    );
   }
 
   @override
@@ -67,6 +82,11 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
         },
         onSelectionChanged: (SelectedContent? content) {
           _selectedContent = content;
+          _lastSelectedPlainText = content?.plainText ?? '';
+          _selectionRange = widget.projection.findRangeForSelectedPlainText(
+            _lastSelectedPlainText,
+            preferredStart: _selectionRange?.start,
+          );
           if (content != null && !_focusNode.hasFocus) {
             _focusNode.requestFocus();
           }
@@ -139,6 +159,18 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
   }
 
   _MarkdownClipboardPayloadData? _buildClipboardPayload() {
+    final _MarkdownSelectionRange? range = _selectionRange;
+    if (range != null) {
+      final String plainText = widget.projection.plainTextForRange(range);
+      final String markdownText = widget.projection.markdownForRange(range);
+      if (plainText.isNotEmpty || markdownText.isNotEmpty) {
+        return _MarkdownClipboardPayloadData(
+          plainText: plainText,
+          markdownText: markdownText,
+        );
+      }
+    }
+
     final String plainText = _extractSelectedPlainText(
       projection: widget.projection,
       selectedContent: _selectedContent,
