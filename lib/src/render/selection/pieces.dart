@@ -115,6 +115,56 @@ class _MarkdownSelectionSegment {
     return hasMatch ? out.toString() : '';
   }
 
+  _MarkdownSelectionRange? markdownRangeForPlainRange(
+    int selectionStart,
+    int selectionEnd,
+  ) {
+    final int start = selectionStart.clamp(0, plainText.length);
+    final int end = selectionEnd.clamp(start, plainText.length);
+    if (start >= end) {
+      return null;
+    }
+    if (start <= 0 && end >= plainText.length) {
+      return _MarkdownSelectionRange(
+          start: 0, end: fallbackMarkdownText.length);
+    }
+
+    int plainCursor = 0;
+    int markdownCursor = 0;
+    int? markdownStart;
+    int? markdownEnd;
+    for (final _MarkdownSelectionPiece piece in pieces) {
+      final int plainStart = plainCursor;
+      final int plainEnd = plainStart + piece.plainText.length;
+      final int markdownStartForPiece = markdownCursor;
+      final int markdownEndForPiece =
+          markdownStartForPiece + piece.markdownText.length;
+      plainCursor = plainEnd;
+      markdownCursor = markdownEndForPiece;
+
+      if (end <= plainStart || start >= plainEnd) {
+        continue;
+      }
+      final int localStart =
+          (start - plainStart).clamp(0, piece.plainText.length);
+      final int localEnd = (end - plainStart).clamp(0, piece.plainText.length);
+      final _MarkdownSelectionRange? pieceRange =
+          piece.markdownRangeForPlainRange(localStart, localEnd);
+      if (pieceRange == null) {
+        continue;
+      }
+      markdownStart ??= markdownStartForPiece + pieceRange.start;
+      markdownEnd = markdownStartForPiece + pieceRange.end;
+    }
+
+    if (markdownStart == null ||
+        markdownEnd == null ||
+        markdownStart >= markdownEnd) {
+      return null;
+    }
+    return _MarkdownSelectionRange(start: markdownStart, end: markdownEnd);
+  }
+
   String _slicePieceMarkdown({
     required _MarkdownSelectionPiece piece,
     required int localStart,
@@ -157,6 +207,31 @@ class _MarkdownSelectionPiece {
 
   final String plainText;
   final String markdownText;
+
+  _MarkdownSelectionRange? markdownRangeForPlainRange(
+    int selectionStart,
+    int selectionEnd,
+  ) {
+    final int start = selectionStart.clamp(0, plainText.length);
+    final int end = selectionEnd.clamp(start, plainText.length);
+    if (start >= end) {
+      return null;
+    }
+    if (start <= 0 && end >= plainText.length) {
+      return _MarkdownSelectionRange(start: 0, end: markdownText.length);
+    }
+    if (markdownText == plainText) {
+      return _MarkdownSelectionRange(start: start, end: end);
+    }
+    final int plainIndex = markdownText.indexOf(plainText);
+    if (plainIndex >= 0) {
+      return _MarkdownSelectionRange(
+        start: plainIndex + start,
+        end: plainIndex + end,
+      );
+    }
+    return _MarkdownSelectionRange(start: 0, end: markdownText.length);
+  }
 }
 
 class _TableSelectionCell {

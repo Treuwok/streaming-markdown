@@ -38,9 +38,15 @@ extension _StreamingMarkdownInlineMarkdownRenderer
     final DateTime? tokenScheduleOrigin = scheduleScope?.revealedAt;
     final Duration resolvedTokenStep =
         scheduleScope?.tokenArrivalDelay ?? tokenStaggerDelay;
+    final _MarkdownSelectionRange? sourceVisualRange =
+        _sourceSelectionVisualRangeForInline(context, normalized.length);
+    final Color? sourceVisualColor = sourceVisualRange == null
+        ? null
+        : _MarkdownSourceSelectionVisualScope.maybeOf(context)?.selectionColor;
 
     final List<InlineSpan> spans = <InlineSpan>[];
     int visualTokenIndex = tokenStartIndex;
+    int plainCursor = 0;
     for (final _InlineToken token in tokens) {
       if (token.isImage) {
         visualTokenIndex = _appendAnimatedWidgetSpan(
@@ -56,6 +62,10 @@ extension _StreamingMarkdownInlineMarkdownRenderer
           baseline: _baselineForPlaceholderAlignment(inlineImageAlignment),
           child: _buildInlineImageToken(context, token, resolvedStyle),
         );
+        plainCursor += _plainTextForVisualInlineToken(
+          token,
+          footnoteNumbers: footnoteNumbers,
+        ).length;
         continue;
       }
 
@@ -72,6 +82,10 @@ extension _StreamingMarkdownInlineMarkdownRenderer
           alignment: PlaceholderAlignment.middle,
           child: _buildLatexToken(context, token, resolvedStyle),
         );
+        plainCursor += _plainTextForVisualInlineToken(
+          token,
+          footnoteNumbers: footnoteNumbers,
+        ).length;
         continue;
       }
 
@@ -104,6 +118,7 @@ extension _StreamingMarkdownInlineMarkdownRenderer
             child: Text(token.text, style: inlineCodeStyle),
           ),
         );
+        plainCursor += token.text.length;
         continue;
       }
 
@@ -137,6 +152,10 @@ extension _StreamingMarkdownInlineMarkdownRenderer
             ),
           ),
         );
+        plainCursor += _plainTextForVisualInlineToken(
+          token,
+          footnoteNumbers: footnoteNumbers,
+        ).length;
         continue;
       }
 
@@ -169,10 +188,17 @@ extension _StreamingMarkdownInlineMarkdownRenderer
           tokenScheduleOrigin: tokenScheduleOrigin,
           tokenAnimationBuilder: tokenAnimationBuilder,
           animatePerWord: animatePerWord,
+          sourceSelectionRange: _localRangeForTextSlice(
+            sourceVisualRange,
+            start: plainCursor,
+            length: token.text.length,
+          ),
+          sourceSelectionColor: sourceVisualColor,
           onTap: showSelectionOverlay
               ? null
               : () => _onLinkPressed(context, token.linkUrl!),
         );
+        plainCursor += token.text.length;
         continue;
       }
       visualTokenIndex = _appendTokenizedTextSpans(
@@ -186,7 +212,14 @@ extension _StreamingMarkdownInlineMarkdownRenderer
         tokenScheduleOrigin: tokenScheduleOrigin,
         tokenAnimationBuilder: tokenAnimationBuilder,
         animatePerWord: animatePerWord,
+        sourceSelectionRange: _localRangeForTextSlice(
+          sourceVisualRange,
+          start: plainCursor,
+          length: token.text.length,
+        ),
+        sourceSelectionColor: sourceVisualColor,
       );
+      plainCursor += token.text.length;
     }
 
     final TextScaler textScaler = MediaQuery.textScalerOf(context);
@@ -221,6 +254,61 @@ extension _StreamingMarkdownInlineMarkdownRenderer
     }
     return _MarkdownImageLoadBarrier(urls: inlineImageUrls, child: output);
   }
+}
+
+_MarkdownSelectionRange? _sourceSelectionVisualRangeForInline(
+  BuildContext context,
+  int textLength,
+) {
+  final _MarkdownSourceSelectionVisualScope? visualScope =
+      _MarkdownSourceSelectionVisualScope.maybeOf(context);
+  final _MarkdownSelectionBlockVisualScope? blockScope =
+      _MarkdownSelectionBlockVisualScope.maybeOf(context);
+  final _MarkdownSourceSelectionRange? sourceRange = visualScope?.sourceRange;
+  final _MarkdownSelectionRange? plainRange = visualScope?.plainRange;
+  if (visualScope == null ||
+      blockScope == null ||
+      sourceRange == null ||
+      plainRange == null) {
+    return null;
+  }
+
+  final _MarkdownSelectionBlockRange blockRange = blockScope.blockRange;
+  if (sourceRange.end <= blockRange.sourceRange.start ||
+      sourceRange.start >= blockRange.sourceRange.end ||
+      plainRange.end <= blockRange.plainRange.start ||
+      plainRange.start >= blockRange.plainRange.end) {
+    return null;
+  }
+
+  final int start =
+      (plainRange.start - blockRange.plainRange.start).clamp(0, textLength);
+  final int end =
+      (plainRange.end - blockRange.plainRange.start).clamp(start, textLength);
+  if (start >= end) {
+    return null;
+  }
+  return _MarkdownSelectionRange(start: start, end: end);
+}
+
+String _plainTextForVisualInlineToken(
+  _InlineToken token, {
+  required Map<String, int> footnoteNumbers,
+}) {
+  if (token.isImage) {
+    return token.altText.isEmpty ? '[image]' : '[image: ${token.altText}]';
+  }
+  if (token.isFootnoteReference) {
+    final int? number = _footnoteNumberForId(
+      footnoteNumbers,
+      token.footnoteReferenceId!,
+    );
+    return number?.toString() ?? token.footnoteReferenceId!;
+  }
+  if (token.isLatex) {
+    return token.sourceMarkdown;
+  }
+  return token.text;
 }
 
 class _SelectionAwareInlineStack extends StatelessWidget {

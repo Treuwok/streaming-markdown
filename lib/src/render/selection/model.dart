@@ -16,6 +16,25 @@ class _MarkdownSelectionProjection {
     return plain.toString();
   }
 
+  String get compactPlainText {
+    final StringBuffer plain = StringBuffer();
+    for (final _MarkdownSelectionSegment segment in segments) {
+      plain.write(segment.plainText);
+    }
+    return plain.toString();
+  }
+
+  String get fullMarkdownText {
+    final StringBuffer markdown = StringBuffer();
+    for (int i = 0; i < segments.length; i++) {
+      if (i > 0) {
+        markdown.write('\n\n');
+      }
+      markdown.write(segments[i].markdownText);
+    }
+    return markdown.toString();
+  }
+
   _MarkdownSelectionRange? findRangeForSelectedPlainText(
     String selectedPlainText, {
     int? preferredStart,
@@ -170,6 +189,101 @@ class _MarkdownSelectionProjection {
     return out.toString();
   }
 
+  _MarkdownSourceSelectionRange? sourceRangeForSelectedPlainText(
+    String selectedPlainText, {
+    int? preferredPlainStart,
+  }) {
+    final _MarkdownSelectionRange? plainRange = findRangeForSelectedPlainText(
+      selectedPlainText,
+      preferredStart: preferredPlainStart,
+    );
+    if (plainRange == null) {
+      return null;
+    }
+    return sourceRangeForPlainRange(plainRange, plainSeparator: '\n\n');
+  }
+
+  _MarkdownSourceSelectionRange? sourceRangeForPlainRange(
+    _MarkdownSelectionRange range, {
+    required String plainSeparator,
+  }) {
+    final StringBuffer plain = StringBuffer();
+    final StringBuffer markdown = StringBuffer();
+    final List<_MarkdownSelectionSegmentRange> plainRanges =
+        <_MarkdownSelectionSegmentRange>[];
+    final List<_MarkdownSelectionSegmentRange> markdownRanges =
+        <_MarkdownSelectionSegmentRange>[];
+
+    for (int i = 0; i < segments.length; i++) {
+      if (i > 0) {
+        plain.write(plainSeparator);
+        markdown.write('\n\n');
+      }
+      final _MarkdownSelectionSegment segment = segments[i];
+      final int plainStart = plain.length;
+      final int markdownStart = markdown.length;
+      plain.write(segment.plainText);
+      markdown.write(segment.markdownText);
+      plainRanges.add(
+        _MarkdownSelectionSegmentRange(
+          segment: segment,
+          start: plainStart,
+          end: plain.length,
+        ),
+      );
+      markdownRanges.add(
+        _MarkdownSelectionSegmentRange(
+          segment: segment,
+          start: markdownStart,
+          end: markdown.length,
+        ),
+      );
+    }
+
+    final int selectionStart = range.start.clamp(0, plain.length);
+    final int selectionEnd = range.end.clamp(selectionStart, plain.length);
+    int? sourceStart;
+    int? sourceEnd;
+
+    for (int i = 0; i < plainRanges.length; i++) {
+      final _MarkdownSelectionSegmentRange plainRange = plainRanges[i];
+      final _MarkdownSelectionSegmentRange markdownRange = markdownRanges[i];
+      final _MarkdownSelectionSegment segment = plainRange.segment;
+      final bool intersects =
+          selectionStart < plainRange.end && selectionEnd > plainRange.start;
+      if (!intersects) {
+        continue;
+      }
+
+      final int localStart = (selectionStart - plainRange.start)
+          .clamp(0, segment.plainText.length);
+      final int localEnd =
+          (selectionEnd - plainRange.start).clamp(0, segment.plainText.length);
+      final _MarkdownSelectionRange? localMarkdownRange =
+          segment.markdownRangeForPlainRange(localStart, localEnd);
+      if (localMarkdownRange == null) {
+        continue;
+      }
+      sourceStart ??= markdownRange.start + localMarkdownRange.start;
+      sourceEnd = markdownRange.start + localMarkdownRange.end;
+    }
+
+    if (sourceStart == null || sourceEnd == null || sourceStart >= sourceEnd) {
+      return null;
+    }
+    return _MarkdownSourceSelectionRange(start: sourceStart, end: sourceEnd);
+  }
+
+  String markdownForSourceRange(_MarkdownSourceSelectionRange range) {
+    final String markdown = fullMarkdownText;
+    final int start = range.start.clamp(0, markdown.length);
+    final int end = range.end.clamp(start, markdown.length);
+    if (start >= end) {
+      return '';
+    }
+    return markdown.substring(start, end);
+  }
+
   String plainTextForSelectedPlainText(String selectedPlainText) {
     final String selected = selectedPlainText.replaceAll('\r', '');
     if (selected.isEmpty) {
@@ -198,7 +312,8 @@ class _MarkdownSelectionProjection {
       return compact;
     }
 
-    final String whitespaceNormalized = _plainTextForWhitespaceNormalizedSelection(
+    final String whitespaceNormalized =
+        _plainTextForWhitespaceNormalizedSelection(
       selected,
       plainSeparator: '\n\n',
     );
@@ -395,8 +510,7 @@ class _MarkdownSelectionProjection {
     if (normalizedStart < 0) {
       return null;
     }
-    final int normalizedEnd =
-        normalizedStart + normalizedSelected.value.length;
+    final int normalizedEnd = normalizedStart + normalizedSelected.value.length;
     final int selectionStart =
         normalizedDocument.originalIndexAt(normalizedStart);
     final int selectionEnd =
@@ -586,6 +700,23 @@ class _MarkdownSelectionRange {
 
   final int start;
   final int end;
+}
+
+class _MarkdownSourceSelectionRange {
+  const _MarkdownSourceSelectionRange({required this.start, required this.end});
+
+  final int start;
+  final int end;
+}
+
+class _MarkdownSelectionBlockRange {
+  const _MarkdownSelectionBlockRange({
+    required this.sourceRange,
+    required this.plainRange,
+  });
+
+  final _MarkdownSourceSelectionRange sourceRange;
+  final _MarkdownSelectionRange plainRange;
 }
 
 class _NormalizedDocumentSelectionMatch {

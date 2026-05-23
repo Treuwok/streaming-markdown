@@ -206,7 +206,8 @@ void main() {
       expect(copied, '# H1\n\nBody paragraph');
     });
 
-    test('range-based selection can target repeated plain text deterministically',
+    test(
+        'range-based selection can target repeated plain text deterministically',
         () {
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
         _node('paragraph', 'first **repeat** marker', startByte: 0),
@@ -229,6 +230,32 @@ void main() {
       );
 
       expect(copied, '**repeat**');
+    });
+
+    test('markdown source range remains absolute when streamed content appends',
+        () {
+      final List<MarkdownRenderNode> initialNodes = <MarkdownRenderNode>[
+        _node('paragraph', 'Alpha target Omega', startByte: 0),
+      ];
+      final (int, int)? sourceRange = StreamingMarkdownRenderView
+          .debugMarkdownSourceRangeForSelectedPlainText(
+        nodes: initialNodes,
+        selectedPlainText: 'target',
+      );
+      expect(sourceRange, isNotNull);
+
+      final List<MarkdownRenderNode> streamedNodes = <MarkdownRenderNode>[
+        _node('paragraph', 'Alpha target Omega', startByte: 0),
+        _node('paragraph', 'Streaming tail still growing', startByte: 20),
+      ];
+      final String copied =
+          StreamingMarkdownRenderView.debugMarkdownForSourceRange(
+        nodes: streamedNodes,
+        sourceStart: sourceRange!.$1,
+        sourceEnd: sourceRange.$2,
+      );
+
+      expect(copied, 'target');
     });
 
     test('table selection maps flattened cell text back to markdown table', () {

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -836,6 +838,616 @@ Setext title
       '---\n\n'
       'Thematic breaks render as horizontal dividers.',
     );
+  });
+
+  testWidgets(
+      'locked markdown source selection survives transient shrink, append, and scroll',
+      (WidgetTester tester) async {
+    String? clipboardText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        switch (methodCall.method) {
+          case 'Clipboard.setData':
+            final Map<dynamic, dynamic> data =
+                methodCall.arguments! as Map<dynamic, dynamic>;
+            clipboardText = data['text'] as String?;
+            return null;
+          case 'Clipboard.getData':
+            return <String, dynamic>{'text': clipboardText};
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final ScrollController scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+
+    List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+      _renderNode('Selected block one.', startByte: 0),
+      _renderNode('Selected block two.', startByte: 21, startRow: 2),
+    ];
+    late StateSetter updateHost;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            updateHost = setState;
+            return Scaffold(
+              body: SizedBox(
+                height: 120,
+                child: ListView(
+                  controller: scrollController,
+                  children: <Widget>[
+                    StreamingMarkdownRenderView(
+                      nodes: nodes,
+                      padding: EdgeInsets.zero,
+                      enableTextSelection: true,
+                      selectionStrategy: SelectionStrategy.raw,
+                      tokenFadeInDuration: Duration.zero,
+                    ),
+                    const SizedBox(height: 400),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    final SelectableRegionState regionState =
+        tester.state<SelectableRegionState>(find.byType(SelectableRegion));
+    regionState.selectAll(SelectionChangedCause.keyboard);
+    await tester.pump();
+
+    updateHost(() {
+      nodes = <MarkdownRenderNode>[
+        _renderNode('Selected block one.', startByte: 0),
+      ];
+    });
+    await tester.pump();
+
+    updateHost(() {
+      nodes = <MarkdownRenderNode>[
+        _renderNode('Selected block one.', startByte: 0),
+        _renderNode('Selected block two.', startByte: 21, startRow: 2),
+        _renderNode(
+          'Appended while the user is scrolling.',
+          startByte: 42,
+          startRow: 4,
+        ),
+      ];
+    });
+    await tester.pump();
+    await tester.drag(find.byType(ListView), const Offset(0, -80));
+    await tester.pump();
+
+    final BuildContext context = tester.element(
+      find
+          .byWidgetPredicate(
+            (Widget widget) =>
+                widget is RichText &&
+                widget.text.toPlainText().contains('Selected block one.'),
+          )
+          .first,
+    );
+    Actions.invoke(context, CopySelectionTextIntent.copy);
+    await tester.pump();
+
+    expect(
+      clipboardText,
+      'Selected block one.\n\nSelected block two.',
+    );
+  });
+
+  testWidgets('drag selection started while streaming remains source-stable',
+      (WidgetTester tester) async {
+    String? clipboardText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        switch (methodCall.method) {
+          case 'Clipboard.setData':
+            final Map<dynamic, dynamic> data =
+                methodCall.arguments! as Map<dynamic, dynamic>;
+            clipboardText = data['text'] as String?;
+            return null;
+          case 'Clipboard.getData':
+            return <String, dynamic>{'text': clipboardText};
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final ScrollController scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+
+    const String selectedBlock = 'Selected block one.';
+    List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+      _renderNode(selectedBlock, startByte: 0),
+      _renderNode(
+        'Streaming block two is still fading in.',
+        startByte: 21,
+        startRow: 2,
+      ),
+    ];
+    late StateSetter updateHost;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            updateHost = setState;
+            return Scaffold(
+              body: SizedBox(
+                height: 120,
+                child: ListView(
+                  controller: scrollController,
+                  children: <Widget>[
+                    StreamingMarkdownRenderView(
+                      nodes: nodes,
+                      padding: EdgeInsets.zero,
+                      enableTextSelection: true,
+                      selectionStrategy: SelectionStrategy.raw,
+                      tokenArrivalDelay: Duration.zero,
+                      tokenFadeInDuration: Duration.zero,
+                    ),
+                    const SizedBox(height: 400),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 2));
+
+    final RenderParagraph paragraph =
+        _renderParagraphContaining(tester, selectedBlock);
+    final TestGesture gesture = await tester.startGesture(
+      _textOffsetToHitPosition(paragraph, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(
+      _textOffsetToHitPosition(paragraph, selectedBlock.length, end: true),
+    );
+    await tester.pump();
+
+    updateHost(() {
+      nodes = <MarkdownRenderNode>[
+        _renderNode(selectedBlock, startByte: 0),
+        _renderNode(
+          'Streaming block two is still fading in.',
+          startByte: 21,
+          startRow: 2,
+        ),
+        _renderNode(
+          'A newly appended block lands while the mouse is still selecting.',
+          startByte: 61,
+          startRow: 4,
+        ),
+      ];
+    });
+    await tester.pump(const Duration(seconds: 2));
+    await gesture.up();
+    await tester.pump();
+    await tester.drag(find.byType(ListView), const Offset(0, -80));
+    await tester.pump();
+
+    final BuildContext context =
+        tester.binding.focusManager.primaryFocus!.context!;
+    Actions.invoke(context, CopySelectionTextIntent.copy);
+    await tester.pump();
+
+    expect(clipboardText, selectedBlock);
+  });
+
+  testWidgets('stream append does not interrupt an active mouse selection drag',
+      (WidgetTester tester) async {
+    String? clipboardText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        switch (methodCall.method) {
+          case 'Clipboard.setData':
+            final Map<dynamic, dynamic> data =
+                methodCall.arguments! as Map<dynamic, dynamic>;
+            clipboardText = data['text'] as String?;
+            return null;
+          case 'Clipboard.getData':
+            return <String, dynamic>{'text': clipboardText};
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    const String selectedBlock = 'Selected block one keeps extending.';
+    List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+      _renderNode(selectedBlock, startByte: 0),
+    ];
+    late StateSetter updateHost;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            updateHost = setState;
+            return Scaffold(
+              body: StreamingMarkdownRenderView(
+                nodes: nodes,
+                padding: EdgeInsets.zero,
+                enableTextSelection: true,
+                selectionStrategy: SelectionStrategy.raw,
+                tokenArrivalDelay: const Duration(milliseconds: 120),
+                tokenFadeInDuration: const Duration(milliseconds: 900),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final RenderParagraph paragraph =
+        _renderParagraphContaining(tester, selectedBlock);
+    final TestGesture gesture = await tester.startGesture(
+      _textOffsetToHitPosition(paragraph, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(_textOffsetToHitPosition(paragraph, 12));
+    await tester.pump();
+
+    updateHost(() {
+      nodes = <MarkdownRenderNode>[
+        _renderNode(selectedBlock, startByte: 0),
+        _renderNode(
+          'A streamed block arrives before the drag is released.',
+          startByte: selectedBlock.length + 2,
+          startRow: 2,
+        ),
+      ];
+    });
+    await tester.pump(const Duration(milliseconds: 120));
+    await gesture.moveTo(
+      _textOffsetToHitPosition(paragraph, selectedBlock.length, end: true),
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    final BuildContext context =
+        tester.binding.focusManager.primaryFocus!.context!;
+    Actions.invoke(context, CopySelectionTextIntent.copy);
+    await tester.pump();
+
+    expect(clipboardText, selectedBlock);
+  });
+
+  testWidgets('stream append after selection keeps native selection adjustable',
+      (WidgetTester tester) async {
+    const Color selectionColor = Color(0x6658A6FF);
+    const String selectedBlock = 'Selected block one stays native.';
+    List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+      _renderNode(selectedBlock, startByte: 0),
+    ];
+    late StateSetter updateHost;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            updateHost = setState;
+            return Scaffold(
+              body: StreamingMarkdownRenderView(
+                nodes: nodes,
+                padding: EdgeInsets.zero,
+                enableTextSelection: true,
+                selectionStrategy: SelectionStrategy.raw,
+                tokenArrivalDelay: const Duration(milliseconds: 120),
+                tokenFadeInDuration: const Duration(milliseconds: 900),
+                markdownTheme: const StreamingMarkdownThemeData(
+                  selectionColor: selectionColor,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final RenderParagraph paragraph =
+        _renderParagraphContaining(tester, selectedBlock);
+    final TestGesture gesture = await tester.startGesture(
+      _textOffsetToHitPosition(paragraph, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(_textOffsetToHitPosition(paragraph, 12));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(_highlightedTextForColor(tester, selectionColor), isEmpty);
+
+    updateHost(() {
+      nodes = <MarkdownRenderNode>[
+        _renderNode(selectedBlock, startByte: 0),
+        _renderNode(
+          'A streamed block arrives after selection has finalized.',
+          startByte: selectedBlock.length + 2,
+          startRow: 2,
+        ),
+      ];
+    });
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(_highlightedTextForColor(tester, selectionColor), isEmpty);
+  });
+
+  testWidgets('locked scroll selection can be replaced by a new drag selection',
+      (WidgetTester tester) async {
+    String? clipboardText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        switch (methodCall.method) {
+          case 'Clipboard.setData':
+            final Map<dynamic, dynamic> data =
+                methodCall.arguments! as Map<dynamic, dynamic>;
+            clipboardText = data['text'] as String?;
+            return null;
+          case 'Clipboard.getData':
+            return <String, dynamic>{'text': clipboardText};
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final ScrollController scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+
+    const String firstBlock = 'First block becomes locked.';
+    const String secondBlock = 'Second block must be selectable after lock.';
+    List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+      _renderNode(firstBlock, startByte: 0),
+      _renderNode(
+        secondBlock,
+        startByte: firstBlock.length + 2,
+        startRow: 2,
+      ),
+    ];
+    late StateSetter updateHost;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            updateHost = setState;
+            return Scaffold(
+              body: SizedBox(
+                height: 110,
+                child: ListView(
+                  controller: scrollController,
+                  children: <Widget>[
+                    StreamingMarkdownRenderView(
+                      nodes: nodes,
+                      padding: EdgeInsets.zero,
+                      enableTextSelection: true,
+                      selectionStrategy: SelectionStrategy.raw,
+                      tokenArrivalDelay: Duration.zero,
+                      tokenFadeInDuration: Duration.zero,
+                    ),
+                    const SizedBox(height: 400),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 2));
+
+    RenderParagraph paragraph = _renderParagraphContaining(tester, firstBlock);
+    TestGesture gesture = await tester.startGesture(
+      _textOffsetToHitPosition(paragraph, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    await gesture.moveTo(
+      _textOffsetToHitPosition(paragraph, firstBlock.length, end: true),
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    scrollController.jumpTo(10);
+    updateHost(() {
+      nodes = <MarkdownRenderNode>[
+        _renderNode(firstBlock, startByte: 0),
+        _renderNode(
+          secondBlock,
+          startByte: firstBlock.length + 2,
+          startRow: 2,
+        ),
+        _renderNode(
+          'Append while the previous selection is locked.',
+          startByte: firstBlock.length + secondBlock.length + 4,
+          startRow: 4,
+        ),
+      ];
+    });
+    await tester.pump(const Duration(seconds: 2));
+
+    paragraph = _renderParagraphContaining(tester, secondBlock);
+    gesture = await tester.startGesture(
+      _textOffsetToHitPosition(paragraph, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    await gesture.moveTo(
+      _textOffsetToHitPosition(paragraph, secondBlock.length, end: true),
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    final BuildContext context =
+        tester.binding.focusManager.primaryFocus!.context!;
+    Actions.invoke(context, CopySelectionTextIntent.copy);
+    await tester.pump();
+
+    expect(clipboardText, secondBlock);
+  });
+
+  testWidgets('scroll during active streaming selection freezes source range',
+      (WidgetTester tester) async {
+    String? clipboardText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        switch (methodCall.method) {
+          case 'Clipboard.setData':
+            final Map<dynamic, dynamic> data =
+                methodCall.arguments! as Map<dynamic, dynamic>;
+            clipboardText = data['text'] as String?;
+            return null;
+          case 'Clipboard.getData':
+            return <String, dynamic>{'text': clipboardText};
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final ScrollController scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+
+    const String selectedBlock = 'Selected block one.';
+    List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+      _renderNode(selectedBlock, startByte: 0),
+      _renderNode(
+        'Streaming block two is visible while selection starts.',
+        startByte: 21,
+        startRow: 2,
+      ),
+    ];
+    late StateSetter updateHost;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            updateHost = setState;
+            return Scaffold(
+              body: SizedBox(
+                height: 120,
+                child: ListView(
+                  controller: scrollController,
+                  children: <Widget>[
+                    StreamingMarkdownRenderView(
+                      nodes: nodes,
+                      padding: EdgeInsets.zero,
+                      enableTextSelection: true,
+                      selectionStrategy: SelectionStrategy.raw,
+                      tokenArrivalDelay: const Duration(milliseconds: 120),
+                      tokenFadeInDuration: const Duration(milliseconds: 900),
+                    ),
+                    const SizedBox(height: 500),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final RenderParagraph paragraph =
+        _renderParagraphContaining(tester, selectedBlock);
+    final TestGesture gesture = await tester.startGesture(
+      _textOffsetToHitPosition(paragraph, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(
+      _textOffsetToHitPosition(paragraph, selectedBlock.length, end: true),
+    );
+    await tester.pump();
+
+    unawaited(
+      scrollController.animateTo(
+        80,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.linear,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 16));
+
+    updateHost(() {
+      nodes = <MarkdownRenderNode>[
+        _renderNode(selectedBlock, startByte: 0),
+        _renderNode(
+          'Streaming block two is visible while selection starts.',
+          startByte: 21,
+          startRow: 2,
+        ),
+        _renderNode(
+          'Append lands while the existing selection is being scrolled.',
+          startByte: 73,
+          startRow: 4,
+        ),
+      ];
+    });
+    await tester.pump(const Duration(milliseconds: 300));
+    await gesture.up();
+    await tester.pump();
+
+    final BuildContext context =
+        tester.binding.focusManager.primaryFocus!.context!;
+    Actions.invoke(context, CopySelectionTextIntent.copy);
+    await tester.pump();
+
+    expect(clipboardText, selectedBlock);
   });
 
   testWidgets('copy select-all preserves markdown for complex blocks', (
@@ -2058,7 +2670,8 @@ Các công thức Laplace:
       findsOneWidget,
     );
     expect(
-      tester.getSize(find.byKey(const ValueKey<String>('markdown_table_frame')))
+      tester
+          .getSize(find.byKey(const ValueKey<String>('markdown_table_frame')))
           .height,
       0,
     );
@@ -2265,6 +2878,66 @@ int _widgetSpanCount(InlineSpan span) {
     return total;
   }
   return 0;
+}
+
+RenderParagraph _renderParagraphContaining(
+  WidgetTester tester,
+  String plainText,
+) {
+  RenderParagraph? fallback;
+  for (final Element element in find.byType(RichText).evaluate()) {
+    final RichText widget = element.widget as RichText;
+    if (!widget.text.toPlainText().contains(plainText)) {
+      continue;
+    }
+    final RenderParagraph paragraph = element.renderObject! as RenderParagraph;
+    if (widget.selectionRegistrar != null) {
+      return paragraph;
+    }
+    fallback ??= paragraph;
+  }
+  if (fallback != null) {
+    return fallback;
+  }
+  throw StateError('No RichText RenderParagraph contains "$plainText".');
+}
+
+String _highlightedTextForColor(WidgetTester tester, Color color) {
+  final StringBuffer highlighted = StringBuffer();
+  for (final RichText richText in tester.widgetList<RichText>(
+    find.byType(RichText),
+  )) {
+    _collectHighlightedText(richText.text, color, highlighted);
+  }
+  return highlighted.toString();
+}
+
+void _collectHighlightedText(InlineSpan span, Color color, StringBuffer out) {
+  if (span is TextSpan) {
+    if (span.style?.backgroundColor == color && span.text != null) {
+      out.write(span.text);
+    }
+    for (final InlineSpan child in span.children ?? const <InlineSpan>[]) {
+      _collectHighlightedText(child, color, out);
+    }
+  }
+}
+
+Offset _textOffsetToPosition(RenderParagraph paragraph, int offset) {
+  const Rect caret = Rect.fromLTWH(0, 0, 2, 20);
+  final Offset localOffset = paragraph.getOffsetForCaret(
+    TextPosition(offset: offset),
+    caret,
+  );
+  return paragraph.localToGlobal(localOffset);
+}
+
+Offset _textOffsetToHitPosition(
+  RenderParagraph paragraph,
+  int offset, {
+  bool end = false,
+}) {
+  return _textOffsetToPosition(paragraph, offset) + Offset(end ? 4 : 2, 8);
 }
 
 List<WidgetSpan> _allWidgetSpans(WidgetTester tester) {

@@ -30,6 +30,8 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 /build/
 /coverage/
+test/render/artifacts/
+test/render/failures/
 website/build/
 website/.docusaurus/
 website/node_modules/
