@@ -1,7 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
-import 'package:flutter/rendering.dart' show SelectedContent;
+import 'package:flutter/rendering.dart'
+    show
+        LayerLink,
+        LeaderLayer,
+        PaintingContext,
+        PipelineOwner,
+        RenderObject,
+        RenderProxyBox,
+        DirectionallyExtendSelectionEvent,
+        GranularlyExtendSelectionEvent,
+        SelectedContent,
+        SelectedContentRange,
+        Selectable,
+        SelectWordSelectionEvent,
+        SelectionExtendDirection,
+        SelectionEdgeUpdateEvent,
+        SelectionEvent,
+        SelectionEventType,
+        SelectionGeometry,
+        SelectionPoint,
+        SelectionRegistrar,
+        SelectionResult,
+        SelectionStatus,
+        SelectionUtils,
+        TextGranularity;
 import 'package:flutter/services.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:html/dom.dart' as html_dom;
@@ -40,9 +64,9 @@ part 'inline/spans.dart';
 part 'inline/markdown.dart';
 part 'inline/token_spans.dart';
 part 'selection/area.dart';
+part 'selection/inline_proxy.dart';
 part 'selection/model.dart';
 part 'selection/pieces.dart';
-part 'selection/overlay.dart';
 part '../copy/plain_text_extractor.dart';
 part '../copy/raw_markdown_extractor.dart';
 part '../copy/html_converter.dart';
@@ -629,8 +653,17 @@ class StreamingMarkdownRenderView extends StatelessWidget {
       selectionStrategy: selectionStrategy,
       allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
       selectionColor: markdownTheme.selectionColor ?? const Color(0x6658A6FF),
+      useSourceSelectionVisual: true,
+      lockFinalizedSelectionVisual: _shouldLockFinalizedSelectionVisual(),
       child: content,
     );
+  }
+
+  bool _shouldLockFinalizedSelectionVisual() {
+    return tokenArrivalDelay > Duration.zero ||
+        _resolvedTokenFadeInDuration() > Duration.zero ||
+        tokenAnimationBuilder != null ||
+        tokenAnimationPaused;
   }
 
   Map<String, _MarkdownSelectionBlockRange> _buildSelectionBlockRanges(
@@ -641,6 +674,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
         <String, _MarkdownSelectionBlockRange>{};
     int sourceCursor = 0;
     int plainCursor = 0;
+    int compactCursor = 0;
     for (int i = 0; i < blocks.length && i < projection.segments.length; i++) {
       if (i > 0) {
         sourceCursor += 2;
@@ -651,6 +685,8 @@ class StreamingMarkdownRenderView extends StatelessWidget {
       final int sourceEnd = sourceStart + segment.markdownText.length;
       final int plainStart = plainCursor;
       final int plainEnd = plainStart + segment.plainText.length;
+      final int compactStart = compactCursor;
+      final int compactEnd = compactStart + segment.plainText.length;
       ranges[_blockIdentity(blocks[i])] = _MarkdownSelectionBlockRange(
         sourceRange: _MarkdownSourceSelectionRange(
           start: sourceStart,
@@ -660,9 +696,14 @@ class StreamingMarkdownRenderView extends StatelessWidget {
           start: plainStart,
           end: plainEnd,
         ),
+        compactRange: _MarkdownSelectionRange(
+          start: compactStart,
+          end: compactEnd,
+        ),
       );
       sourceCursor = sourceEnd;
       plainCursor = plainEnd;
+      compactCursor = compactEnd;
     }
     return ranges;
   }
@@ -672,7 +713,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
       return false;
     }
     if (tokenCompaction == AnimatedMarkdownTokenCompaction.automatic &&
-        (debugTokenHighlight || tokenAnimationBuilder != null)) {
+        debugTokenHighlight) {
       return false;
     }
     return true;

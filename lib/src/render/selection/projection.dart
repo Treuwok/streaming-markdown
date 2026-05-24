@@ -163,24 +163,27 @@ extension _StreamingMarkdownSelectionProjectionBuilder
       );
     }
 
-    for (int columnIndex = 0;
-        columnIndex < table.headers.length;
-        columnIndex++) {
-      appendCell(
-        rowIndex: 0,
-        columnIndex: columnIndex,
-        markdown: table.headers[columnIndex],
-      );
-    }
-    for (int rowIndex = 0; rowIndex < table.rows.length; rowIndex++) {
-      final List<String> row = table.rows[rowIndex];
-      for (int columnIndex = 0; columnIndex < row.length; columnIndex++) {
+    void appendRow({
+      required int rowIndex,
+      required List<String> row,
+    }) {
+      for (int columnIndex = 0;
+          columnIndex < table.headers.length;
+          columnIndex++) {
+        if (columnIndex >= row.length) {
+          continue;
+        }
         appendCell(
-          rowIndex: rowIndex + 1,
+          rowIndex: rowIndex,
           columnIndex: columnIndex,
           markdown: row[columnIndex],
         );
       }
+    }
+
+    appendRow(rowIndex: 0, row: table.headers);
+    for (int rowIndex = 0; rowIndex < table.rows.length; rowIndex++) {
+      appendRow(rowIndex: rowIndex + 1, row: table.rows[rowIndex]);
     }
 
     final String plainText =

@@ -6,6 +6,8 @@ class _MarkdownSelectionArea extends StatefulWidget {
     required this.selectionStrategy,
     required this.allowUnclosedInlineDelimiters,
     required this.selectionColor,
+    required this.useSourceSelectionVisual,
+    required this.lockFinalizedSelectionVisual,
     required this.child,
   });
 
@@ -13,6 +15,8 @@ class _MarkdownSelectionArea extends StatefulWidget {
   final SelectionStrategy selectionStrategy;
   final bool allowUnclosedInlineDelimiters;
   final Color selectionColor;
+  final bool useSourceSelectionVisual;
+  final bool lockFinalizedSelectionVisual;
   final Widget child;
 
   @override
@@ -22,6 +26,8 @@ class _MarkdownSelectionArea extends StatefulWidget {
 class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
   final GlobalKey<SelectionAreaState> _selectionAreaKey =
       GlobalKey<SelectionAreaState>();
+  final _MarkdownInlineSelectionRegistry _inlineSelectionRegistry =
+      _MarkdownInlineSelectionRegistry();
   SelectedContent? _selectedContent;
   _MarkdownSelectionRange? _selectionRange;
   _MarkdownSourceSelectionRange? _sourceSelectionRange;
@@ -44,6 +50,7 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
   void initState() {
     super.initState();
     _focusNode.addListener(_handleFocusChanged);
+    _inlineSelectionRegistry.addListener(_handleInlineSelectionChanged);
     web_copy.WebCopyInterceptor.attach(
       focusNode: _focusNode,
       onCopy: _handleBrowserCopy,
@@ -54,6 +61,8 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
   void dispose() {
     web_copy.WebCopyInterceptor.detach(focusNode: _focusNode);
     _detachScrollPosition();
+    _inlineSelectionRegistry.removeListener(_handleInlineSelectionChanged);
+    _inlineSelectionRegistry.dispose();
     _focusNode.removeListener(_handleFocusChanged);
     _focusNode.dispose();
     super.dispose();
@@ -158,39 +167,137 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
                   return;
                 }
               }
-              _setSourceSelectionVisualActive(false);
-              _selectionCreatedByPointer = _selectionCreatedByPointer ||
-                  _selectionPointerActive ||
-                  _frameworkSelectionChanging;
-              _lastSelectedPlainText = plainText;
-              _selectionRange = widget.projection.findRangeForSelectedPlainText(
-                plainText,
-                preferredStart: _selectionRange?.start,
-              );
-              _sourceSelectionRange =
-                  widget.projection.sourceRangeForSelectedPlainText(
-                plainText,
-                preferredPlainStart: _selectionRange?.start,
-              );
-              _selectionEpoch += 1;
+              _selectionCreatedByPointer =
+                  _selectionCreatedByPointer || _selectionPointerActive;
+              _syncSelectionFromFramework(plainText);
               if (content != null && !_focusNode.hasFocus) {
                 _focusNode.requestFocus();
               }
             },
-            child: _MarkdownSourceSelectionVisualScope(
-              sourceRange:
-                  _sourceSelectionVisualActive ? _sourceSelectionRange : null,
-              plainRange: _sourceSelectionVisualActive ? _selectionRange : null,
-              selectionColor: widget.selectionColor,
-              child: _SelectableRegionStatusListener(
-                onStatusChanged: _handleSelectableRegionStatusChanged,
-                child: widget.child,
+            child: _MarkdownInlineSelectionRegistryScope(
+              registry: _inlineSelectionRegistry,
+              child: _MarkdownSourceSelectionVisualScope(
+                sourceRange:
+                    _sourceSelectionVisualActive ? _sourceSelectionRange : null,
+                plainRange:
+                    _sourceSelectionVisualActive ? _selectionRange : null,
+                selectionColor: widget.selectionColor,
+                child: _SelectableRegionStatusListener(
+                  onStatusChanged: _handleSelectableRegionStatusChanged,
+                  child: widget.child,
+                ),
               ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  void _handleInlineSelectionChanged() {
+    if (!mounted) {
+      return;
+    }
+    if (!_selectionPointerActive && !_selectionCreatedByPointer) {
+      return;
+    }
+    final _MarkdownInlineSelectionAggregate? selection =
+        _inlineSelectionRegistry.selection;
+    if (selection == null) {
+      return;
+    }
+    if (_selectionRangeLocked &&
+        !_selectionPointerActive &&
+        !_frameworkSelectionChanging) {
+      return;
+    }
+    _selectionCreatedByPointer =
+        _selectionCreatedByPointer || _selectionPointerActive;
+    _syncSelectionFromInlineRegistry(selection);
+  }
+
+  void _syncSelectionFromFramework(String plainText) {
+    final _MarkdownInlineSelectionAggregate? inlineSelection =
+        (_selectionPointerActive || _selectionCreatedByPointer)
+            ? _inlineSelectionRegistry.selection
+            : null;
+    if (inlineSelection != null) {
+      _syncSelectionFromInlineRegistry(inlineSelection);
+      return;
+    }
+    _syncSelectionFromPlainText(plainText);
+  }
+
+  void _syncSelectionFromInlineRegistry(
+    _MarkdownInlineSelectionAggregate selection,
+  ) {
+    final _MarkdownSourceSelectionRange? sourceRange =
+        widget.projection.sourceRangeForPlainRange(
+      selection.compactRange,
+      plainSeparator: '',
+    );
+    if (sourceRange == null) {
+      _syncSelectionFromPlainText(_selectedContent?.plainText ?? '');
+      return;
+    }
+    final String plainText =
+        widget.projection.plainTextForRange(selection.displayRange);
+    _applySelectionSnapshot(
+      plainRange: selection.displayRange,
+      sourceRange: sourceRange,
+      plainText: plainText,
+    );
+  }
+
+  void _syncSelectionFromPlainText(String plainText) {
+    final String selectedPlainText = plainText.replaceAll('\r', '');
+    final _MarkdownSelectionRange? plainRange =
+        widget.projection.findRangeForSelectedPlainText(
+      selectedPlainText,
+      preferredStart: _selectionRange?.start,
+    );
+    final _MarkdownSourceSelectionRange? sourceRange =
+        widget.projection.sourceRangeForSelectedPlainText(
+      selectedPlainText,
+      preferredPlainStart: plainRange?.start ?? _selectionRange?.start,
+    );
+    _applySelectionSnapshot(
+      plainRange: plainRange,
+      sourceRange: sourceRange,
+      plainText: plainRange == null
+          ? selectedPlainText
+          : widget.projection.plainTextForRange(plainRange),
+    );
+  }
+
+  void _applySelectionSnapshot({
+    required _MarkdownSelectionRange? plainRange,
+    required _MarkdownSourceSelectionRange? sourceRange,
+    required String plainText,
+  }) {
+    final bool visualActive = widget.useSourceSelectionVisual &&
+        plainRange != null &&
+        sourceRange != null;
+    if (_selectionRange == plainRange &&
+        _sourceSelectionRange == sourceRange &&
+        _lastSelectedPlainText == plainText &&
+        _sourceSelectionVisualActive == visualActive) {
+      return;
+    }
+
+    void apply() {
+      _selectionRange = plainRange;
+      _sourceSelectionRange = sourceRange;
+      _lastSelectedPlainText = plainText;
+      _sourceSelectionVisualActive = visualActive;
+      _selectionEpoch += 1;
+    }
+
+    if (mounted) {
+      setState(apply);
+    } else {
+      apply();
+    }
   }
 
   void _copyMarkdownSelection() {
@@ -249,6 +356,12 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
       final String markdownText =
           widget.projection.markdownForSourceRange(sourceRange);
       if (markdownText.isNotEmpty || _lastSelectedPlainText.isNotEmpty) {
+        if (rangePayload != null &&
+            rangePayload.markdownText.isNotEmpty &&
+            rangePayload.plainText == _lastSelectedPlainText &&
+            markdownText.length > rangePayload.markdownText.length) {
+          return rangePayload;
+        }
         if (rangePayload != null &&
             rangePayload.markdownText.length > markdownText.length &&
             rangePayload.markdownText.startsWith(markdownText)) {
@@ -349,6 +462,9 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
         break;
       case SelectableRegionSelectionStatus.finalized:
         _frameworkSelectionChanging = false;
+        if (widget.lockFinalizedSelectionVisual) {
+          _scheduleFinalizedSelectionVisualLock();
+        }
         break;
     }
   }
@@ -403,7 +519,7 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
     }
     _selectionRangeLocked = true;
     if (deferClear) {
-      _sourceSelectionVisualActive = true;
+      _setSourceSelectionVisualActive(true);
       _scheduleFrameworkSelectionClear();
       return;
     }
@@ -430,10 +546,28 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
     });
   }
 
+  void _scheduleFinalizedSelectionVisualLock() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      scheduleMicrotask(() {
+        if (!mounted ||
+            _selectionPointerActive ||
+            _sourceSelectionRange == null ||
+            _selectionRange == null ||
+            _lastSelectedPlainText.isEmpty) {
+          return;
+        }
+        _freezeSelectionForViewportMutation(deferClear: true);
+      });
+    });
+  }
+
   void _handlePointerDown(PointerDownEvent event) {
     if (event.kind != PointerDeviceKind.mouse ||
         (event.buttons & kPrimaryButton) == 0) {
       return;
+    }
+    if (_selectionRangeLocked && _sourceSelectionRange != null) {
+      _clearSelectionCache(notify: _sourceSelectionVisualActive);
     }
     _selectionPointerActive = true;
     _activeSelectionPointer = event.pointer;
@@ -449,6 +583,10 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
     if (_deferViewportFreezeUntilPointerUp) {
       _deferViewportFreezeUntilPointerUp = false;
       _freezeSelectionForViewportMutation(deferClear: true);
+      return;
+    }
+    if (widget.lockFinalizedSelectionVisual) {
+      _scheduleFinalizedSelectionVisualLock();
     }
   }
 
@@ -460,19 +598,7 @@ class _MarkdownSelectionAreaState extends State<_MarkdownSelectionArea> {
         oldProjection.fullMarkdownText == widget.projection.fullMarkdownText) {
       return false;
     }
-    if (_selectionRangeLocked ||
-        _sourceSelectionVisualActive ||
-        !_selectionCreatedByPointer) {
-      return true;
-    }
-    final String oldSelectedMarkdown =
-        oldProjection.markdownForSourceRange(sourceRange);
-    final String newSelectedMarkdown =
-        widget.projection.markdownForSourceRange(sourceRange);
-    if (newSelectedMarkdown.isEmpty && oldSelectedMarkdown.isNotEmpty) {
-      return true;
-    }
-    return oldSelectedMarkdown != newSelectedMarkdown;
+    return true;
   }
 
   void _detachScrollPosition() {
@@ -520,6 +646,141 @@ class _MarkdownSourceSelectionVisualScope extends InheritedWidget {
         plainRange != oldWidget.plainRange ||
         selectionColor != oldWidget.selectionColor;
   }
+}
+
+class _MarkdownInlineSelectionRegistryScope extends InheritedWidget {
+  const _MarkdownInlineSelectionRegistryScope({
+    required this.registry,
+    required super.child,
+  });
+
+  final _MarkdownInlineSelectionRegistry registry;
+
+  static _MarkdownInlineSelectionRegistry? maybeOf(BuildContext context) {
+    return context
+        .dependOnInheritedWidgetOfExactType<
+            _MarkdownInlineSelectionRegistryScope>()
+        ?.registry;
+  }
+
+  @override
+  bool updateShouldNotify(
+    covariant _MarkdownInlineSelectionRegistryScope oldWidget,
+  ) {
+    return registry != oldWidget.registry;
+  }
+}
+
+class _MarkdownInlineSelectionRegistry extends ChangeNotifier {
+  final Map<Selectable, _MarkdownInlineSelectionSnapshot> _selections =
+      <Selectable, _MarkdownInlineSelectionSnapshot>{};
+
+  _MarkdownInlineSelectionAggregate? get selection {
+    if (_selections.isEmpty) {
+      return null;
+    }
+    int? displayStart;
+    int? displayEnd;
+    int? compactStart;
+    int? compactEnd;
+    for (final _MarkdownInlineSelectionSnapshot snapshot
+        in _selections.values) {
+      displayStart = displayStart == null
+          ? snapshot.displayRange.start
+          : (displayStart < snapshot.displayRange.start
+              ? displayStart
+              : snapshot.displayRange.start);
+      displayEnd = displayEnd == null
+          ? snapshot.displayRange.end
+          : (displayEnd > snapshot.displayRange.end
+              ? displayEnd
+              : snapshot.displayRange.end);
+      compactStart = compactStart == null
+          ? snapshot.compactRange.start
+          : (compactStart < snapshot.compactRange.start
+              ? compactStart
+              : snapshot.compactRange.start);
+      compactEnd = compactEnd == null
+          ? snapshot.compactRange.end
+          : (compactEnd > snapshot.compactRange.end
+              ? compactEnd
+              : snapshot.compactRange.end);
+    }
+    if (displayStart == null ||
+        displayEnd == null ||
+        compactStart == null ||
+        compactEnd == null ||
+        displayStart >= displayEnd ||
+        compactStart >= compactEnd) {
+      return null;
+    }
+    return _MarkdownInlineSelectionAggregate(
+      displayRange: _MarkdownSelectionRange(
+        start: displayStart,
+        end: displayEnd,
+      ),
+      compactRange: _MarkdownSelectionRange(
+        start: compactStart,
+        end: compactEnd,
+      ),
+    );
+  }
+
+  void update(
+    Selectable selectable, {
+    required _MarkdownSelectionRange displayRange,
+    required _MarkdownSelectionRange compactRange,
+  }) {
+    final _MarkdownInlineSelectionSnapshot next =
+        _MarkdownInlineSelectionSnapshot(
+      displayRange: displayRange,
+      compactRange: compactRange,
+    );
+    if (_selections[selectable] == next) {
+      return;
+    }
+    _selections[selectable] = next;
+    notifyListeners();
+  }
+
+  void clear(Selectable selectable, {bool notify = true}) {
+    if (_selections.remove(selectable) == null) {
+      return;
+    }
+    if (notify) {
+      notifyListeners();
+    }
+  }
+}
+
+class _MarkdownInlineSelectionSnapshot {
+  const _MarkdownInlineSelectionSnapshot({
+    required this.displayRange,
+    required this.compactRange,
+  });
+
+  final _MarkdownSelectionRange displayRange;
+  final _MarkdownSelectionRange compactRange;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _MarkdownInlineSelectionSnapshot &&
+        other.displayRange == displayRange &&
+        other.compactRange == compactRange;
+  }
+
+  @override
+  int get hashCode => Object.hash(displayRange, compactRange);
+}
+
+class _MarkdownInlineSelectionAggregate {
+  const _MarkdownInlineSelectionAggregate({
+    required this.displayRange,
+    required this.compactRange,
+  });
+
+  final _MarkdownSelectionRange displayRange;
+  final _MarkdownSelectionRange compactRange;
 }
 
 class _MarkdownSelectionBlockVisualScope extends InheritedWidget {

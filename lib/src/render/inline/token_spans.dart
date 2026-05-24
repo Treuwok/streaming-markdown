@@ -25,7 +25,9 @@ extension _StreamingMarkdownInlineTokenSpans on StreamingMarkdownRenderView {
     Color? sourceSelectionColor,
     VoidCallback? onTap,
   }) {
-    if (!animatePerWord && onTap == null) {
+    final bool preserveStaticTokenLayout =
+        !animatePerWord && fadeDuration > Duration.zero;
+    if (!animatePerWord && !preserveStaticTokenLayout && onTap == null) {
       spans.addAll(
         _sourceHighlightedTextSpans(
           text,
@@ -36,7 +38,7 @@ extension _StreamingMarkdownInlineTokenSpans on StreamingMarkdownRenderView {
       );
       return startTokenIndex + _inlineWordCount(text);
     }
-    if (!animatePerWord) {
+    if (!animatePerWord && !preserveStaticTokenLayout) {
       final Widget textWidget =
           sourceSelectionRange == null || sourceSelectionColor == null
               ? Text(text, style: style)
@@ -121,6 +123,26 @@ extension _StreamingMarkdownInlineTokenSpans on StreamingMarkdownRenderView {
                       ),
                     ),
                   );
+      }
+
+      if (!animatePerWord) {
+        spans.add(
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: onTap == null
+                ? tokenWidget
+                : (debugTokenHighlight
+                    ? InkWell(
+                        onTap: onTap,
+                        borderRadius: BorderRadius.circular(4),
+                        child: tokenWidget,
+                      )
+                    : GestureDetector(onTap: onTap, child: tokenWidget)),
+          ),
+        );
+        tokenIndex += 1;
+        continue;
       }
 
       spans.add(

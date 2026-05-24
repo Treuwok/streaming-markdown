@@ -55,14 +55,12 @@ extension _StreamingMarkdownTableAndMetadataRenderer
     final DateTime? tokenScheduleOrigin = scheduleScope?.revealedAt;
     final Duration resolvedTokenStep =
         scheduleScope?.tokenArrivalDelay ?? tokenArrivalDelay;
-    final Color borderColor =
-        markdownTheme.tableBorderColor ??
+    final Color borderColor = markdownTheme.tableBorderColor ??
         Color.alphaBlend(
           colorScheme.outline.withValues(alpha: 0.18),
           colorScheme.outlineVariant,
         );
-    final Color headerBackground =
-        markdownTheme.tableHeaderBackgroundColor ??
+    final Color headerBackground = markdownTheme.tableHeaderBackgroundColor ??
         Color.alphaBlend(
           colorScheme.primary.withValues(alpha: 0.08),
           colorScheme.surfaceContainerHighest,
@@ -80,9 +78,105 @@ extension _StreamingMarkdownTableAndMetadataRenderer
       return const SizedBox(key: ValueKey<String>('markdown_table_frame'));
     }
 
+    final List<double> columnWidths = _tableColumnWidths(context, table);
+    final double tableWidth = columnWidths.fold<double>(
+      0,
+      (double sum, double width) => sum + width,
+    );
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final double viewportMaxWidth = screenWidth >= 900 ? 560 : screenWidth;
+    final double frameWidth =
+        tableWidth < viewportMaxWidth ? tableWidth : viewportMaxWidth;
+    final List<List<String>> visualRows = <List<String>>[
+      table.headers,
+      ...table.rows,
+    ];
+    final List<List<int>> plainTextStarts = List<List<int>>.generate(
+      visualRows.length,
+      (_) => List<int>.filled(table.headers.length, 0),
+    );
+    int plainCursor = 0;
+    for (int rowIndex = 0; rowIndex < visualRows.length; rowIndex++) {
+      for (int col = 0; col < table.headers.length; col++) {
+        final List<String> row = visualRows[rowIndex];
+        final String cell = col < row.length ? row[col] : '';
+        final String cellPlainText = _inlineSelectionPlainText(
+          cell,
+          linkReferences: linkReferences,
+          footnoteNumbers: footnoteNumbers,
+        );
+        plainCursor += cellPlainText.length;
+        plainTextStarts[rowIndex][col] = plainCursor - cellPlainText.length;
+      }
+    }
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SizedBox(
+        key: const ValueKey<String>('markdown_table_frame'),
+        width: frameWidth,
+        child: DecoratedBox(
+          decoration: BoxDecoration(color: bodyBackground),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Builder(
+              builder: (BuildContext tableContext) {
+                final List<Widget> rowTables = _buildTableRows(
+                  tableContext,
+                  table: table,
+                  theme: theme,
+                  colorScheme: colorScheme,
+                  headerBackground: headerBackground,
+                  bodyBackground: bodyBackground,
+                  alternateRowBackground: alternateRowBackground,
+                  borderColor: borderColor,
+                  columnWidths: columnWidths,
+                  tableWidth: tableWidth,
+                  tokenScheduleOrigin: tokenScheduleOrigin,
+                  resolvedTokenStep: resolvedTokenStep,
+                  linkReferences: linkReferences,
+                  footnoteNumbers: footnoteNumbers,
+                  plainTextStarts: plainTextStarts,
+                );
+                return Align(
+                  alignment: Alignment.centerLeft,
+                  child: SizedBox(
+                    width: tableWidth,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: rowTables,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildTableRows(
+    BuildContext context, {
+    required _ParsedTable table,
+    required ThemeData theme,
+    required ColorScheme colorScheme,
+    required Color headerBackground,
+    required Color bodyBackground,
+    required Color alternateRowBackground,
+    required Color borderColor,
+    required List<double> columnWidths,
+    required double tableWidth,
+    required DateTime? tokenScheduleOrigin,
+    required Duration resolvedTokenStep,
+    required Map<String, String> linkReferences,
+    required Map<String, int> footnoteNumbers,
+    required List<List<int>> plainTextStarts,
+  }) {
     Widget buildStableCellContent({
       required String cell,
       required int tokenStartIndex,
+      required int plainTextStart,
       required TextStyle baseStyle,
     }) {
       return _TokenReserveLayoutScope(
@@ -91,6 +185,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
           context,
           cell,
           tokenStartIndex: tokenStartIndex,
+          plainTextStart: plainTextStart,
           baseStyle: baseStyle,
           linkReferences: linkReferences,
           footnoteNumbers: footnoteNumbers,
@@ -98,16 +193,10 @@ extension _StreamingMarkdownTableAndMetadataRenderer
       );
     }
 
-    int tokenStartIndex = 0;
-    final List<double> columnWidths = _tableColumnWidths(context, table);
-    final double tableWidth = columnWidths.fold<double>(
-      0,
-      (double sum, double width) => sum + width,
-    );
-
     Widget buildCellPadding({
       required String cell,
       required int tokenStartIndex,
+      required int plainTextStart,
       required TextStyle baseStyle,
     }) {
       return Padding(
@@ -115,6 +204,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
         child: buildStableCellContent(
           cell: cell,
           tokenStartIndex: tokenStartIndex,
+          plainTextStart: plainTextStart,
           baseStyle: baseStyle,
         ),
       );
@@ -123,6 +213,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
     Widget buildRow({
       required List<String> cells,
       required int rowTokenStartIndex,
+      required List<int> rowPlainTextStarts,
       required bool isHeader,
       required int bodyRowIndex,
       required bool revealWithGate,
@@ -144,8 +235,8 @@ extension _StreamingMarkdownTableAndMetadataRenderer
                 color: isHeader
                     ? headerBackground
                     : (bodyRowIndex.isEven
-                          ? bodyBackground
-                          : alternateRowBackground),
+                        ? bodyBackground
+                        : alternateRowBackground),
                 border: Border(
                   top: isHeader
                       ? BorderSide(color: borderColor)
@@ -160,6 +251,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
               child: buildCellPadding(
                 cell: cell,
                 tokenStartIndex: localTokenIndex,
+                plainTextStart: rowPlainTextStarts[col],
                 baseStyle: isHeader
                     ? theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w700,
@@ -212,6 +304,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
       );
     }
 
+    int tokenStartIndex = 0;
     final int headerGateStartIndex = tokenStartIndex;
     for (int col = 0; col < table.headers.length; col++) {
       tokenStartIndex += _countAnimatedTokenUnits(
@@ -224,6 +317,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
       buildRow(
         cells: table.headers,
         rowTokenStartIndex: headerGateStartIndex,
+        rowPlainTextStarts: plainTextStarts[0],
         isHeader: true,
         bodyRowIndex: 0,
         revealWithGate: false,
@@ -243,6 +337,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
         buildRow(
           cells: row,
           rowTokenStartIndex: rowGateStartIndex,
+          rowPlainTextStarts: plainTextStarts[rowIndex + 1],
           isHeader: false,
           bodyRowIndex: rowIndex,
           revealWithGate: true,
@@ -250,36 +345,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
         ),
       );
     }
-
-    final double screenWidth = MediaQuery.sizeOf(context).width;
-    final double viewportMaxWidth = screenWidth >= 900 ? 560 : screenWidth;
-    final double frameWidth = tableWidth < viewportMaxWidth
-        ? tableWidth
-        : viewportMaxWidth;
-
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: SizedBox(
-        key: const ValueKey<String>('markdown_table_frame'),
-        width: frameWidth,
-        child: DecoratedBox(
-          decoration: BoxDecoration(color: bodyBackground),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: SizedBox(
-                width: tableWidth,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: rowTables,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    return rowTables;
   }
 
   List<double> _tableColumnWidths(
@@ -317,9 +383,8 @@ extension _StreamingMarkdownTableAndMetadataRenderer
     final bool shouldScaleDown = totalPreferred > targetWidth;
     final double scale = shouldScaleDown ? targetWidth / totalPreferred : 1;
     return List<double>.generate(columnCount, (int col) {
-      final double scaledWidth = shouldScaleDown
-          ? preferredWidths[col] * scale
-          : preferredWidths[col];
+      final double scaledWidth =
+          shouldScaleDown ? preferredWidths[col] * scale : preferredWidths[col];
       return scaledWidth.clamp(112, preferredWidths[col]);
     }, growable: false);
   }
@@ -345,9 +410,8 @@ extension _StreamingMarkdownTableAndMetadataRenderer
     final int visibleChars = plain.length > 42 ? 42 : plain.length;
     final double contentWidth = visibleChars * 7.6;
     final double longestWordWidth = longestWord * 8.4;
-    final double estimated = contentWidth > longestWordWidth
-        ? contentWidth
-        : longestWordWidth;
+    final double estimated =
+        contentWidth > longestWordWidth ? contentWidth : longestWordWidth;
     return estimated.clamp(96, 332);
   }
 

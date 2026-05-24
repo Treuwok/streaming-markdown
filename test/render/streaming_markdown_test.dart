@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -365,18 +366,8 @@ Setext title
       ),
     );
 
-    final Iterable<RichText> candidates =
-        tester.widgetList<RichText>(find.byType(RichText)).where(
-              (RichText widget) => widget.text.toPlainText().contains('OpenAI'),
-            );
-    TapGestureRecognizer? recognizer;
-    for (final RichText widget in candidates) {
-      recognizer = _findRecognizerForText(widget.text, 'OpenAI');
-      if (recognizer != null) {
-        break;
-      }
-    }
-    recognizer?.onTap?.call();
+    await tester.tap(find.text('OpenAI'));
+    await tester.pump();
 
     expect(tappedUrl, 'https://openai.com');
   });
@@ -413,12 +404,10 @@ Setext title
       ),
     );
 
-    final RichText visibleText = tester
-        .widgetList<RichText>(find.byType(RichText))
-        .firstWhere((RichText widget) =>
-            widget.text.toPlainText().contains('Inline links render'));
-    expect(_widgetSpanCount(visibleText.text), 0);
-    expect(visibleText.text.toPlainText(), contains('OpenAI'));
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(_inlineSelectionProxyCount(tester), 2);
+    expect(find.text('OpenAI'), findsOneWidget);
   });
 
   testWidgets('selection-enabled inline text still fades in', (
@@ -444,11 +433,130 @@ Setext title
 
     expect(_activeTokenOpacity(tester), greaterThan(0));
     expect(_activeTokenOpacity(tester), lessThan(1));
-    final RichText visibleText = tester
-        .widgetList<RichText>(find.byType(RichText))
-        .firstWhere((RichText widget) =>
-            widget.text.toPlainText().contains('Inline OpenAI link.'));
-    expect(_widgetSpanCount(visibleText.text), 0);
+    expect(_inlineSelectionProxyCount(tester), 1);
+    expect(_totalWidgetSpanCount(tester), greaterThan(0));
+  });
+
+  testWidgets('selection keeps animated inline pixels identical', (
+    WidgetTester tester,
+  ) async {
+    const Size surfaceSize = Size(460, 96);
+    await tester.binding.setSurfaceSize(surfaceSize);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final MarkdownRenderNode node = _renderNode(
+      'Pixel [OpenAI](https://openai.com) **bold** words stay exact.',
+    );
+
+    Future<Uint8List> capture({required bool enableTextSelection}) async {
+      final Key boundaryKey = ValueKey<String>(
+        'selection-animation-pixel-${enableTextSelection ? 'on' : 'off'}',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: RepaintBoundary(
+              key: boundaryKey,
+              child: ColoredBox(
+                color: Colors.white,
+                child: SizedBox(
+                  width: surfaceSize.width,
+                  height: surfaceSize.height,
+                  child: StreamingMarkdownRenderView(
+                    nodes: <MarkdownRenderNode>[node],
+                    padding: const EdgeInsets.all(8),
+                    enableTextSelection: enableTextSelection,
+                    tokenArrivalDelay: Duration.zero,
+                    tokenFadeInDuration: const Duration(milliseconds: 200),
+                    tokenFadeInCurve: Curves.linear,
+                    tokenCompaction: AnimatedMarkdownTokenCompaction.disabled,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump();
+      final double opacity = _activeTokenOpacity(tester);
+      expect(opacity, greaterThan(0));
+      expect(opacity, lessThan(1));
+      return _captureRawRgba(tester, find.byKey(boundaryKey));
+    }
+
+    final Uint8List selectionDisabled =
+        await capture(enableTextSelection: false);
+    final Uint8List selectionEnabled = await capture(enableTextSelection: true);
+
+    expect(selectionEnabled, orderedEquals(selectionDisabled));
+  });
+
+  testWidgets('custom token animation locks selection to source visual', (
+    WidgetTester tester,
+  ) async {
+    const Color selectionColor = Color(0x6658A6FF);
+    const String selectedBlock = 'Animated selection should stay anchored.';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StreamingMarkdownRenderView(
+            nodes: <MarkdownRenderNode>[_renderNode(selectedBlock)],
+            padding: EdgeInsets.zero,
+            enableTextSelection: true,
+            selectionStrategy: SelectionStrategy.raw,
+            tokenArrivalDelay: const Duration(milliseconds: 80),
+            tokenFadeInDuration: const Duration(milliseconds: 600),
+            tokenAnimationBuilder: (
+              BuildContext context,
+              StreamingMarkdownAnimatedToken token,
+            ) {
+              final double t = Curves.easeOutBack.transform(token.value);
+              return Opacity(
+                opacity: token.value,
+                child: Transform.translate(
+                  offset: Offset((1 - t) * -10, 0),
+                  child: Transform.rotate(
+                    angle: (1 - t) * -0.42,
+                    alignment: Alignment.bottomLeft,
+                    child: token.child,
+                  ),
+                ),
+              );
+            },
+            markdownTheme: const StreamingMarkdownThemeData(
+              selectionColor: selectionColor,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    const String selectedText = 'Animated';
+    final Rect textRect = tester.getRect(find.text(selectedText));
+    final Rect regionRect = tester.getRect(find.byType(SelectableRegion));
+    final double startX =
+        (textRect.left + 1).clamp(regionRect.left + 1, regionRect.right - 1);
+    final Offset start = Offset(startX, textRect.top + 8);
+    final Offset end = Offset(textRect.right + 4, textRect.top + 8);
+    final TestGesture gesture = await tester.startGesture(
+      start,
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(end);
+    await tester.pump();
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.pump();
+
+    expect(_highlightedTextForColor(tester, selectionColor), selectedText);
   });
 
   testWidgets('selection-enabled inline text keeps custom token animation idle',
@@ -603,7 +711,7 @@ Setext title
     expect(plainText, isNot(contains('    final')));
   });
 
-  testWidgets('settled tokens compact to static spans without layout jump', (
+  testWidgets('settled tokens compact to layout-stable token nodes', (
     WidgetTester tester,
   ) async {
     const String paragraph =
@@ -633,42 +741,81 @@ Setext title
     await tester.pump(const Duration(milliseconds: 260));
     final Size beforeCompaction = tester.getSize(find.byKey(rootKey));
     final int beforeCount = _totalWidgetSpanCount(tester);
+    final int beforeHostCount = _fadeInTokenHostCount(tester);
+    final Map<String, Rect> beforeRects = _rectsForTexts(
+      tester,
+      <String>['One', 'five', 'nine', 'twelve.'],
+    );
     expect(beforeCount, greaterThan(1));
+    expect(beforeHostCount, greaterThan(1));
 
     await tester.pump();
     final Size afterCompaction = tester.getSize(find.byKey(rootKey));
     final int afterCount = _totalWidgetSpanCount(tester);
+    final int afterHostCount = _fadeInTokenHostCount(tester);
+    final Map<String, Rect> afterRects = _rectsForTexts(
+      tester,
+      <String>['One', 'five', 'nine', 'twelve.'],
+    );
 
     expect(afterCompaction, beforeCompaction);
-    expect(afterCount, lessThan(beforeCount));
-    expect(afterCount, 0);
+    expect(afterCount, beforeCount);
+    expect(afterHostCount, 0);
+    _expectRectsClose(afterRects, beforeRects);
   });
 
-  testWidgets('automatic token compaction preserves custom animation spans', (
+  testWidgets('automatic token compaction strips custom animation hosts', (
     WidgetTester tester,
   ) async {
-    const String paragraph = 'Custom animation keeps token widgets.';
+    const String paragraph = 'Custom animation compacts settled widgets.';
+    final GlobalKey rootKey = GlobalKey();
 
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: StreamingMarkdownRenderView(
-            nodes: <MarkdownRenderNode>[_renderNode(paragraph)],
-            padding: EdgeInsets.zero,
-            tokenArrivalDelay: const Duration(milliseconds: 20),
-            tokenFadeInDuration: const Duration(milliseconds: 20),
-            tokenAnimationBuilder:
-                (BuildContext context, StreamingMarkdownAnimatedToken token) {
-              return Opacity(opacity: token.value, child: token.child);
-            },
+          body: SizedBox(
+            key: rootKey,
+            child: StreamingMarkdownRenderView(
+              nodes: <MarkdownRenderNode>[_renderNode(paragraph)],
+              padding: EdgeInsets.zero,
+              tokenArrivalDelay: const Duration(milliseconds: 20),
+              tokenFadeInDuration: const Duration(milliseconds: 20),
+              tokenAnimationBuilder: (
+                BuildContext context,
+                StreamingMarkdownAnimatedToken token,
+              ) {
+                return Opacity(opacity: token.value, child: token.child);
+              },
+            ),
           ),
         ),
       ),
     );
 
-    await tester.pumpAndSettle(const Duration(milliseconds: 500));
-
+    await tester.pump();
     expect(_totalWidgetSpanCount(tester), greaterThan(1));
+
+    await tester.pump(const Duration(milliseconds: 260));
+    final Size beforeCompaction = tester.getSize(find.byKey(rootKey));
+    final int beforeHostCount = _fadeInTokenHostCount(tester);
+    final Map<String, Rect> beforeRects = _rectsForTexts(
+      tester,
+      <String>['Custom', 'animation', 'settled', 'widgets.'],
+    );
+    expect(_totalWidgetSpanCount(tester), greaterThan(1));
+    expect(beforeHostCount, greaterThan(1));
+
+    await tester.pump();
+    final Size afterCompaction = tester.getSize(find.byKey(rootKey));
+    final int afterHostCount = _fadeInTokenHostCount(tester);
+    final Map<String, Rect> afterRects = _rectsForTexts(
+      tester,
+      <String>['Custom', 'animation', 'settled', 'widgets.'],
+    );
+
+    expect(afterCompaction, beforeCompaction);
+    expect(afterHostCount, 0);
+    _expectRectsClose(afterRects, beforeRects);
   });
 
   testWidgets('selection container is absent when text selection is disabled', (
@@ -736,17 +883,7 @@ Setext title
     regionState.selectAll(SelectionChangedCause.keyboard);
     await tester.pump();
 
-    final BuildContext context = tester.element(
-      find
-          .byWidgetPredicate(
-            (Widget widget) =>
-                widget is RichText &&
-                widget.text.toPlainText().contains('Inline OpenAI link.'),
-          )
-          .first,
-    );
-    Actions.invoke(context, CopySelectionTextIntent.copy);
-    await tester.pump();
+    await _copySelection(tester);
 
     expect(clipboardText, 'Inline [OpenAI](https://openai.com) link.');
   });
@@ -818,17 +955,7 @@ Setext title
     regionState.selectAll(SelectionChangedCause.keyboard);
     await tester.pump();
 
-    final BuildContext context = tester.element(
-      find
-          .byWidgetPredicate(
-            (Widget widget) =>
-                widget is RichText &&
-                widget.text.toPlainText().contains('Front matter'),
-          )
-          .first,
-    );
-    Actions.invoke(context, CopySelectionTextIntent.copy);
-    await tester.pump();
+    await _copySelection(tester);
 
     expect(
       clipboardText,
@@ -930,17 +1057,7 @@ Setext title
     await tester.drag(find.byType(ListView), const Offset(0, -80));
     await tester.pump();
 
-    final BuildContext context = tester.element(
-      find
-          .byWidgetPredicate(
-            (Widget widget) =>
-                widget is RichText &&
-                widget.text.toPlainText().contains('Selected block one.'),
-          )
-          .first,
-    );
-    Actions.invoke(context, CopySelectionTextIntent.copy);
-    await tester.pump();
+    await _copySelection(tester);
 
     expect(
       clipboardText,
@@ -1059,6 +1176,90 @@ Setext title
     expect(clipboardText, selectedBlock);
   });
 
+  testWidgets('drag selection can span multiple markdown blocks',
+      (WidgetTester tester) async {
+    String? clipboardText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        switch (methodCall.method) {
+          case 'Clipboard.setData':
+            final Map<dynamic, dynamic> data =
+                methodCall.arguments! as Map<dynamic, dynamic>;
+            clipboardText = data['text'] as String?;
+            return null;
+          case 'Clipboard.getData':
+            return <String, dynamic>{'text': clipboardText};
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    const String firstBlock = 'Alpha block begins.';
+    const String secondBlock = 'Second block ends.';
+    final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+      _renderNode(firstBlock, startByte: 0),
+      _renderNode(
+        secondBlock,
+        startByte: firstBlock.length + 2,
+        startRow: 2,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StreamingMarkdownRenderView(
+            nodes: nodes,
+            padding: EdgeInsets.zero,
+            enableTextSelection: true,
+            selectionStrategy: SelectionStrategy.raw,
+            tokenArrivalDelay: Duration.zero,
+            tokenFadeInDuration: Duration.zero,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final RenderParagraph firstParagraph =
+        _renderParagraphContaining(tester, firstBlock);
+    final RenderParagraph secondParagraph =
+        _renderParagraphContaining(tester, secondBlock);
+    final TestGesture gesture = await tester.startGesture(
+      _textOffsetToHitPosition(
+        firstParagraph,
+        firstBlock.indexOf('block'),
+      ),
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(
+      _textOffsetToHitPosition(
+        secondParagraph,
+        secondBlock.indexOf('block') + 'block'.length,
+        end: true,
+      ),
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    final BuildContext context =
+        tester.binding.focusManager.primaryFocus!.context!;
+    Actions.invoke(context, CopySelectionTextIntent.copy);
+    await tester.pump();
+
+    expect(clipboardText, 'block begins.\n\nSecond block');
+  });
+
   testWidgets('stream append does not interrupt an active mouse selection drag',
       (WidgetTester tester) async {
     String? clipboardText;
@@ -1111,15 +1312,13 @@ Setext title
     );
     await tester.pump(const Duration(milliseconds: 120));
 
-    final RenderParagraph paragraph =
-        _renderParagraphContaining(tester, selectedBlock);
     final TestGesture gesture = await tester.startGesture(
-      _textOffsetToHitPosition(paragraph, 0),
+      _textWidgetHitPosition(tester, 'Selected'),
       kind: PointerDeviceKind.mouse,
     );
     addTearDown(gesture.removePointer);
     await tester.pump();
-    await gesture.moveTo(_textOffsetToHitPosition(paragraph, 12));
+    await gesture.moveTo(_textWidgetHitPosition(tester, 'block', end: true));
     await tester.pump();
 
     updateHost(() {
@@ -1132,10 +1331,9 @@ Setext title
         ),
       ];
     });
-    await tester.pump(const Duration(milliseconds: 120));
-    await gesture.moveTo(
-      _textOffsetToHitPosition(paragraph, selectedBlock.length, end: true),
-    );
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture
+        .moveTo(_textWidgetHitPosition(tester, 'extending.', end: true));
     await tester.pump();
     await gesture.up();
     await tester.pump(const Duration(milliseconds: 80));
@@ -1148,10 +1346,10 @@ Setext title
     expect(clipboardText, selectedBlock);
   });
 
-  testWidgets('stream append after selection keeps native selection adjustable',
+  testWidgets('stream append after selection locks source visual',
       (WidgetTester tester) async {
     const Color selectionColor = Color(0x6658A6FF);
-    const String selectedBlock = 'Selected block one stays native.';
+    const String selectedBlock = 'Selected block one stays anchored.';
     List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
       _renderNode(selectedBlock, startByte: 0),
     ];
@@ -1181,19 +1379,20 @@ Setext title
     );
     await tester.pump(const Duration(milliseconds: 120));
 
-    final RenderParagraph paragraph =
-        _renderParagraphContaining(tester, selectedBlock);
+    const String selectedText = 'Selected';
     final TestGesture gesture = await tester.startGesture(
-      _textOffsetToHitPosition(paragraph, 0),
+      _textWidgetHitPosition(tester, selectedText),
       kind: PointerDeviceKind.mouse,
     );
     addTearDown(gesture.removePointer);
     await tester.pump();
-    await gesture.moveTo(_textOffsetToHitPosition(paragraph, 12));
+    await gesture
+        .moveTo(_textWidgetHitPosition(tester, selectedText, end: true));
     await tester.pump();
     await gesture.up();
     await tester.pump(const Duration(milliseconds: 80));
-    expect(_highlightedTextForColor(tester, selectionColor), isEmpty);
+    await tester.pump();
+    expect(_highlightedTextForColor(tester, selectionColor), selectedText);
 
     updateHost(() {
       nodes = <MarkdownRenderNode>[
@@ -1206,8 +1405,9 @@ Setext title
       ];
     });
     await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump();
 
-    expect(_highlightedTextForColor(tester, selectionColor), isEmpty);
+    expect(_highlightedTextForColor(tester, selectionColor), selectedText);
   });
 
   testWidgets('locked scroll selection can be replaced by a new drag selection',
@@ -1401,17 +1601,14 @@ Setext title
     );
     await tester.pump(const Duration(milliseconds: 120));
 
-    final RenderParagraph paragraph =
-        _renderParagraphContaining(tester, selectedBlock);
     final TestGesture gesture = await tester.startGesture(
-      _textOffsetToHitPosition(paragraph, 0),
+      _textWidgetHitPosition(tester, 'Selected'),
       kind: PointerDeviceKind.mouse,
     );
     addTearDown(gesture.removePointer);
     await tester.pump();
-    await gesture.moveTo(
-      _textOffsetToHitPosition(paragraph, selectedBlock.length, end: true),
-    );
+    await tester.pump(const Duration(milliseconds: 300));
+    await gesture.moveTo(_textWidgetHitPosition(tester, 'one.', end: true));
     await tester.pump();
 
     unawaited(
@@ -1553,17 +1750,7 @@ class Greeter {
     regionState.selectAll(SelectionChangedCause.keyboard);
     await tester.pump();
 
-    final BuildContext context = tester.element(
-      find
-          .byWidgetPredicate(
-            (Widget widget) =>
-                widget is RichText &&
-                widget.text.toPlainText().contains('Copy Audit'),
-          )
-          .first,
-    );
-    Actions.invoke(context, CopySelectionTextIntent.copy);
-    await tester.pump();
+    await _copySelection(tester);
 
     expect(
       clipboardText,
@@ -1666,17 +1853,7 @@ class Greeter {
     regionState.selectAll(SelectionChangedCause.keyboard);
     await tester.pump();
 
-    final BuildContext context = tester.element(
-      find
-          .byWidgetPredicate(
-            (Widget widget) =>
-                widget is RichText &&
-                widget.text.toPlainText().contains('Footnotes'),
-          )
-          .first,
-    );
-    Actions.invoke(context, CopySelectionTextIntent.copy);
-    await tester.pump();
+    await _copySelection(tester);
 
     expect(
       clipboardText,
@@ -2776,24 +2953,6 @@ MarkdownRenderNode _renderNode(
   );
 }
 
-TapGestureRecognizer? _findRecognizerForText(InlineSpan span, String target) {
-  if (span is TextSpan) {
-    if (span.text == target && span.recognizer is TapGestureRecognizer) {
-      return span.recognizer! as TapGestureRecognizer;
-    }
-    for (final InlineSpan child in span.children ?? const <InlineSpan>[]) {
-      final TapGestureRecognizer? recognizer = _findRecognizerForText(
-        child,
-        target,
-      );
-      if (recognizer != null) {
-        return recognizer;
-      }
-    }
-  }
-  return null;
-}
-
 double _activeTokenOpacity(WidgetTester tester) {
   final List<double> activeOpacities = tester
       .widgetList<Opacity>(find.byType(Opacity))
@@ -2835,6 +2994,20 @@ double _activeTokenOpacity(WidgetTester tester) {
   return 0;
 }
 
+Future<Uint8List> _captureRawRgba(WidgetTester tester, Finder finder) async {
+  final RenderRepaintBoundary boundary =
+      tester.renderObject<RenderRepaintBoundary>(finder);
+  final Uint8List? pixels = await tester.runAsync<Uint8List>(() async {
+    final ui.Image image = await boundary.toImage();
+    final ByteData? byteData = await image.toByteData(
+      format: ui.ImageByteFormat.rawRgba,
+    );
+    image.dispose();
+    return Uint8List.fromList(byteData!.buffer.asUint8List());
+  });
+  return pixels!;
+}
+
 List<double> _activeTextSpanOpacities(InlineSpan span) {
   final List<double> values = <double>[];
   if (span is TextSpan) {
@@ -2866,6 +3039,63 @@ int _totalWidgetSpanCount(WidgetTester tester) {
   return total;
 }
 
+int _fadeInTokenHostCount(WidgetTester tester) {
+  return find
+      .byWidgetPredicate(
+        (Widget widget) => widget.runtimeType.toString() == '_FadeInTokenHost',
+      )
+      .evaluate()
+      .length;
+}
+
+Map<String, Rect> _rectsForTexts(WidgetTester tester, List<String> texts) {
+  return <String, Rect>{
+    for (final String text in texts) text: tester.getRect(find.text(text)),
+  };
+}
+
+void _expectRectsClose(
+  Map<String, Rect> actual,
+  Map<String, Rect> expected, {
+  double epsilon = 0.01,
+}) {
+  expect(actual.keys, expected.keys);
+  for (final String text in expected.keys) {
+    final Rect actualRect = actual[text]!;
+    final Rect expectedRect = expected[text]!;
+    expect(
+      actualRect.left,
+      moreOrLessEquals(expectedRect.left, epsilon: epsilon),
+      reason: '$text left',
+    );
+    expect(
+      actualRect.top,
+      moreOrLessEquals(expectedRect.top, epsilon: epsilon),
+      reason: '$text top',
+    );
+    expect(
+      actualRect.width,
+      moreOrLessEquals(expectedRect.width, epsilon: epsilon),
+      reason: '$text width',
+    );
+    expect(
+      actualRect.height,
+      moreOrLessEquals(expectedRect.height, epsilon: epsilon),
+      reason: '$text height',
+    );
+  }
+}
+
+int _inlineSelectionProxyCount(WidgetTester tester) {
+  return find
+      .byWidgetPredicate(
+        (Widget widget) =>
+            widget.runtimeType.toString() == '_SelectableInlineTextProxy',
+      )
+      .evaluate()
+      .length;
+}
+
 int _widgetSpanCount(InlineSpan span) {
   if (span is WidgetSpan) {
     return 1;
@@ -2878,6 +3108,12 @@ int _widgetSpanCount(InlineSpan span) {
     return total;
   }
   return 0;
+}
+
+Future<void> _copySelection(WidgetTester tester) async {
+  final BuildContext context = tester.element(find.byType(SelectableRegion));
+  Actions.invoke(context, CopySelectionTextIntent.copy);
+  await tester.pump();
 }
 
 RenderParagraph _renderParagraphContaining(
@@ -2904,6 +3140,20 @@ RenderParagraph _renderParagraphContaining(
 
 String _highlightedTextForColor(WidgetTester tester, Color color) {
   final StringBuffer highlighted = StringBuffer();
+  for (final Element element in find
+      .byWidgetPredicate(
+        (Widget widget) =>
+            widget.runtimeType.toString() == '_InlineSourceSelectionBackdrop',
+      )
+      .evaluate()) {
+    final dynamic widget = element.widget;
+    if (widget.selectionColor == color) {
+      highlighted.write(widget.selectedText as String);
+    }
+  }
+  if (highlighted.isNotEmpty) {
+    return highlighted.toString();
+  }
   for (final RichText richText in tester.widgetList<RichText>(
     find.byType(RichText),
   )) {
@@ -2938,6 +3188,18 @@ Offset _textOffsetToHitPosition(
   bool end = false,
 }) {
   return _textOffsetToPosition(paragraph, offset) + Offset(end ? 4 : 2, 8);
+}
+
+Offset _textWidgetHitPosition(
+  WidgetTester tester,
+  String text, {
+  bool end = false,
+}) {
+  final Rect textRect = tester.getRect(find.text(text));
+  final Rect regionRect = tester.getRect(find.byType(SelectableRegion));
+  final double rawX = end ? textRect.right + 4 : textRect.left + 1;
+  final double x = rawX.clamp(regionRect.left + 1, regionRect.right - 1);
+  return Offset(x, textRect.top + textRect.height / 2);
 }
 
 List<WidgetSpan> _allWidgetSpans(WidgetTester tester) {

@@ -35,6 +35,14 @@ class _MarkdownSelectionProjection {
     return markdown.toString();
   }
 
+  int get _compactPlainTextLength {
+    int length = 0;
+    for (final _MarkdownSelectionSegment segment in segments) {
+      length += segment.plainText.length;
+    }
+    return length;
+  }
+
   _MarkdownSelectionRange? findRangeForSelectedPlainText(
     String selectedPlainText, {
     int? preferredStart,
@@ -66,6 +74,31 @@ class _MarkdownSelectionProjection {
       searchFrom = hit + 1;
     }
     if (bestStart < 0) {
+      final _NormalizedDocumentSelectionMatch? displayMatch =
+          _matchWhitespaceNormalizedSelection(
+        selected,
+        plainSeparator: '\n\n',
+      );
+      if (displayMatch != null) {
+        return _MarkdownSelectionRange(
+          start: displayMatch.selectionStart,
+          end: displayMatch.selectionEnd,
+        );
+      }
+
+      final _NormalizedDocumentSelectionMatch? compactMatch =
+          _matchWhitespaceNormalizedSelection(
+        selected,
+        plainSeparator: '',
+      );
+      if (compactMatch != null) {
+        return displayRangeForCompactRange(
+          _MarkdownSelectionRange(
+            start: compactMatch.selectionStart,
+            end: compactMatch.selectionEnd,
+          ),
+        );
+      }
       return null;
     }
     return _MarkdownSelectionRange(
@@ -75,26 +108,27 @@ class _MarkdownSelectionProjection {
   }
 
   String plainTextForRange(_MarkdownSelectionRange range) {
-    final StringBuffer plain = StringBuffer();
     final List<_MarkdownSelectionSegmentRange> ranges =
         <_MarkdownSelectionSegmentRange>[];
+    int cursor = 0;
     for (int i = 0; i < segments.length; i++) {
       if (i > 0) {
-        plain.write('\n\n');
+        cursor += 2;
       }
-      final int start = plain.length;
-      plain.write(segments[i].plainText);
+      final _MarkdownSelectionSegment segment = segments[i];
+      final int start = cursor;
+      cursor += segment.plainText.length;
       ranges.add(
         _MarkdownSelectionSegmentRange(
-          segment: segments[i],
+          segment: segment,
           start: start,
-          end: plain.length,
+          end: cursor,
         ),
       );
     }
 
-    final int selectionStart = range.start.clamp(0, plain.length);
-    final int selectionEnd = range.end.clamp(selectionStart, plain.length);
+    final int selectionStart = range.start.clamp(0, cursor);
+    final int selectionEnd = range.end.clamp(selectionStart, cursor);
     final StringBuffer out = StringBuffer();
     for (final _MarkdownSelectionSegmentRange segmentRange in ranges) {
       final _MarkdownSelectionSegment segment = segmentRange.segment;
@@ -131,26 +165,27 @@ class _MarkdownSelectionProjection {
   }
 
   String markdownForRange(_MarkdownSelectionRange range) {
-    final StringBuffer plain = StringBuffer();
     final List<_MarkdownSelectionSegmentRange> ranges =
         <_MarkdownSelectionSegmentRange>[];
+    int cursor = 0;
     for (int i = 0; i < segments.length; i++) {
       if (i > 0) {
-        plain.write('\n\n');
+        cursor += 2;
       }
-      final int start = plain.length;
-      plain.write(segments[i].plainText);
+      final _MarkdownSelectionSegment segment = segments[i];
+      final int start = cursor;
+      cursor += segment.plainText.length;
       ranges.add(
         _MarkdownSelectionSegmentRange(
-          segment: segments[i],
+          segment: segment,
           start: start,
-          end: plain.length,
+          end: cursor,
         ),
       );
     }
 
-    final int selectionStart = range.start.clamp(0, plain.length);
-    final int selectionEnd = range.end.clamp(selectionStart, plain.length);
+    final int selectionStart = range.start.clamp(0, cursor);
+    final int selectionEnd = range.end.clamp(selectionStart, cursor);
     final StringBuffer out = StringBuffer();
 
     for (final _MarkdownSelectionSegmentRange segmentRange in ranges) {
@@ -203,45 +238,71 @@ class _MarkdownSelectionProjection {
     return sourceRangeForPlainRange(plainRange, plainSeparator: '\n\n');
   }
 
+  _MarkdownSelectionRange? displayRangeForCompactRange(
+    _MarkdownSelectionRange range,
+  ) {
+    final int compactLength = _compactPlainTextLength;
+    if (compactLength <= 0) {
+      return null;
+    }
+    final int rawStart = range.start < range.end ? range.start : range.end;
+    final int rawEnd = range.start < range.end ? range.end : range.start;
+    final int selectionStart = rawStart.clamp(0, compactLength);
+    final int selectionEnd = rawEnd.clamp(selectionStart, compactLength);
+    if (selectionStart >= selectionEnd) {
+      return null;
+    }
+    return _MarkdownSelectionRange(
+      start: _displayOffsetForCompactOffset(
+        selectionStart,
+        preferNextAtBoundary: true,
+      ),
+      end: _displayOffsetForCompactOffset(
+        selectionEnd,
+        preferNextAtBoundary: false,
+      ),
+    );
+  }
+
   _MarkdownSourceSelectionRange? sourceRangeForPlainRange(
     _MarkdownSelectionRange range, {
     required String plainSeparator,
   }) {
-    final StringBuffer plain = StringBuffer();
-    final StringBuffer markdown = StringBuffer();
     final List<_MarkdownSelectionSegmentRange> plainRanges =
         <_MarkdownSelectionSegmentRange>[];
     final List<_MarkdownSelectionSegmentRange> markdownRanges =
         <_MarkdownSelectionSegmentRange>[];
 
+    int plainCursor = 0;
+    int markdownCursor = 0;
     for (int i = 0; i < segments.length; i++) {
       if (i > 0) {
-        plain.write(plainSeparator);
-        markdown.write('\n\n');
+        plainCursor += plainSeparator.length;
+        markdownCursor += 2;
       }
       final _MarkdownSelectionSegment segment = segments[i];
-      final int plainStart = plain.length;
-      final int markdownStart = markdown.length;
-      plain.write(segment.plainText);
-      markdown.write(segment.markdownText);
+      final int plainStart = plainCursor;
+      final int markdownStart = markdownCursor;
+      plainCursor += segment.plainText.length;
+      markdownCursor += segment.markdownText.length;
       plainRanges.add(
         _MarkdownSelectionSegmentRange(
           segment: segment,
           start: plainStart,
-          end: plain.length,
+          end: plainCursor,
         ),
       );
       markdownRanges.add(
         _MarkdownSelectionSegmentRange(
           segment: segment,
           start: markdownStart,
-          end: markdown.length,
+          end: markdownCursor,
         ),
       );
     }
 
-    final int selectionStart = range.start.clamp(0, plain.length);
-    final int selectionEnd = range.end.clamp(selectionStart, plain.length);
+    final int selectionStart = range.start.clamp(0, plainCursor);
+    final int selectionEnd = range.end.clamp(selectionStart, plainCursor);
     int? sourceStart;
     int? sourceEnd;
 
@@ -272,6 +333,31 @@ class _MarkdownSelectionProjection {
       return null;
     }
     return _MarkdownSourceSelectionRange(start: sourceStart, end: sourceEnd);
+  }
+
+  int _displayOffsetForCompactOffset(
+    int offset, {
+    required bool preferNextAtBoundary,
+  }) {
+    int compactCursor = 0;
+    int displayCursor = 0;
+    for (int i = 0; i < segments.length; i++) {
+      final int length = segments[i].plainText.length;
+      final int compactEnd = compactCursor + length;
+      final bool atBoundary = offset == compactEnd;
+      final bool withinSegment = offset < compactEnd ||
+          (!preferNextAtBoundary && atBoundary) ||
+          i == segments.length - 1;
+      if (withinSegment) {
+        return displayCursor + (offset - compactCursor).clamp(0, length);
+      }
+      compactCursor = compactEnd;
+      displayCursor += length;
+      if (i < segments.length - 1) {
+        displayCursor += 2;
+      }
+    }
+    return displayCursor;
   }
 
   String markdownForSourceRange(_MarkdownSourceSelectionRange range) {
@@ -700,6 +786,16 @@ class _MarkdownSelectionRange {
 
   final int start;
   final int end;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _MarkdownSelectionRange &&
+        other.start == start &&
+        other.end == end;
+  }
+
+  @override
+  int get hashCode => Object.hash(start, end);
 }
 
 class _MarkdownSourceSelectionRange {
@@ -707,16 +803,28 @@ class _MarkdownSourceSelectionRange {
 
   final int start;
   final int end;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _MarkdownSourceSelectionRange &&
+        other.start == start &&
+        other.end == end;
+  }
+
+  @override
+  int get hashCode => Object.hash(start, end);
 }
 
 class _MarkdownSelectionBlockRange {
   const _MarkdownSelectionBlockRange({
     required this.sourceRange,
     required this.plainRange,
+    required this.compactRange,
   });
 
   final _MarkdownSourceSelectionRange sourceRange;
   final _MarkdownSelectionRange plainRange;
+  final _MarkdownSelectionRange compactRange;
 }
 
 class _NormalizedDocumentSelectionMatch {

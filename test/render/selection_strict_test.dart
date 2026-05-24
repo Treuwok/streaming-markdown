@@ -491,7 +491,10 @@ void main() {
 
       expect(find.byType(SelectionArea), findsOneWidget);
       expect(find.byType(SelectableRegion), findsOneWidget);
-      expect(_richTextPlainTexts(tester), contains('Prefix bold suffix'));
+      expect(_inlineSelectionProxyCount(tester), greaterThanOrEqualTo(1));
+      expect(find.text('Prefix'), findsOneWidget);
+      expect(find.text('bold'), findsOneWidget);
+      expect(find.text('suffix'), findsOneWidget);
     });
 
     testWidgets('pixel parity smoke: same render size with/without selection', (
@@ -598,7 +601,7 @@ void main() {
       );
     });
 
-    testWidgets('selection overlay matches inline markdown rendering',
+    testWidgets('direct selection matches inline markdown rendering',
         (WidgetTester tester) async {
       await tester.binding.setSurfaceSize(const Size(640, 240));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -962,11 +965,14 @@ List<String> _renderSignatures(List<MarkdownRenderNode> nodes) {
   }).toList(growable: false);
 }
 
-List<String> _richTextPlainTexts(WidgetTester tester) {
-  return tester
-      .widgetList<RichText>(find.byType(RichText))
-      .map((RichText widget) => widget.text.toPlainText())
-      .toList(growable: false);
+int _inlineSelectionProxyCount(WidgetTester tester) {
+  return find
+      .byWidgetPredicate(
+        (Widget widget) =>
+            widget.runtimeType.toString() == '_SelectableInlineTextProxy',
+      )
+      .evaluate()
+      .length;
 }
 
 MarkdownRenderNode _node(

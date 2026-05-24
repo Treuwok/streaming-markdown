@@ -297,6 +297,128 @@ void main() {
       _expectSourceVisualDoesNotHighlight(tester, firstLine);
     },
   );
+
+  testWidgets(
+    'locked table selection preserves partial text inside a cell',
+    (WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(520, 190));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      String? clipboardText;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (MethodCall methodCall) async {
+          switch (methodCall.method) {
+            case 'Clipboard.setData':
+              final Map<dynamic, dynamic> data =
+                  methodCall.arguments! as Map<dynamic, dynamic>;
+              clipboardText = data['text'] as String?;
+              return null;
+            case 'Clipboard.getData':
+              return <String, dynamic>{'text': clipboardText};
+          }
+          return null;
+        },
+      );
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        );
+      });
+
+      final ScrollController scrollController = ScrollController();
+      addTearDown(scrollController.dispose);
+
+      const String prefix = 'Paragraph before the table must not be selected.';
+      const String rawTable = '| M | Cat | Dog |\n'
+          '| --- | --- | --- |\n'
+          '| Q | Quiet | Loud |\n'
+          '| X | Calm | Busy |';
+      final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+        _renderNode(prefix, startByte: 0),
+        const MarkdownRenderNode(
+          type: 'pipe_table',
+          depth: 0,
+          startByte: prefix.length + 2,
+          endByte: prefix.length + 2 + rawTable.length,
+          startRow: 2,
+          endRow: 5,
+          raw: rawTable,
+          content: rawTable,
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            backgroundColor: Colors.white,
+            body: ColoredBox(
+              color: Colors.white,
+              child: SizedBox(
+                width: 520,
+                height: 190,
+                child: ListView(
+                  controller: scrollController,
+                  padding: EdgeInsets.zero,
+                  children: <Widget>[
+                    StreamingMarkdownRenderView(
+                      nodes: nodes,
+                      padding: const EdgeInsets.all(8),
+                      enableTextSelection: true,
+                      selectionStrategy: SelectionStrategy.raw,
+                      tokenArrivalDelay: Duration.zero,
+                      tokenFadeInDuration: Duration.zero,
+                      markdownTheme: const StreamingMarkdownThemeData(
+                        selectionColor: _selectionColor,
+                        paragraphTextStyle: TextStyle(
+                          color: Colors.black,
+                          fontFamily: _testFontFamily,
+                          fontSize: 16,
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 320),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 120));
+
+      final RenderParagraph quietParagraph =
+          _renderParagraphContaining(tester, 'Quiet');
+      final TestGesture gesture = await tester.startGesture(
+        _textOffsetToPosition(quietParagraph, 1) + const Offset(2, 8),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      await gesture.moveTo(
+        _textOffsetToPosition(quietParagraph, 4) + const Offset(4, 8),
+      );
+      await tester.pump(const Duration(milliseconds: 80));
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 80));
+
+      scrollController.jumpTo(12);
+      await tester.pump(const Duration(milliseconds: 1000 ~/ _fps));
+
+      expect(_highlightedText(tester), 'uiet');
+
+      final BuildContext copyContext =
+          tester.binding.focusManager.primaryFocus!.context!;
+      Actions.invoke(copyContext, CopySelectionTextIntent.copy);
+      await tester.pump();
+      expect(
+        clipboardText,
+        '| Cat |\n'
+        '| --- |\n'
+        '| uiet |',
+      );
+    },
+  );
 }
 
 Future<void> _recordFrame(
@@ -333,13 +455,7 @@ void _expectSourceVisualHighlightsOnly(
   WidgetTester tester,
   String selectedLine,
 ) {
-  final StringBuffer highlighted = StringBuffer();
-  for (final Element element in find.byType(RichText).evaluate()) {
-    final RichText widget = element.widget as RichText;
-    _collectHighlightedText(widget.text, highlighted);
-  }
-
-  final String actual = highlighted.toString();
+  final String actual = _highlightedText(tester);
   if (actual.isEmpty) {
     return;
   }
@@ -354,15 +470,39 @@ void _expectSourceVisualDoesNotHighlight(
   WidgetTester tester,
   String text,
 ) {
+  expect(_highlightedText(tester), isNot(contains(text)));
+}
+
+String _highlightedText(WidgetTester tester) {
   final StringBuffer highlighted = StringBuffer();
+  for (final Element element in find
+      .byWidgetPredicate(
+        (Widget widget) =>
+            widget.runtimeType.toString() == '_InlineSourceSelectionBackdrop',
+      )
+      .evaluate()) {
+    final dynamic widget = element.widget;
+    if (widget.selectionColor == _selectionColor) {
+      highlighted.write(widget.selectedText as String);
+    }
+  }
+  if (highlighted.isNotEmpty) {
+    return highlighted.toString();
+  }
   for (final Element element in find.byType(RichText).evaluate()) {
     final RichText widget = element.widget as RichText;
     _collectHighlightedText(widget.text, highlighted);
   }
-  expect(highlighted.toString(), isNot(contains(text)));
+  return highlighted.toString();
 }
 
 void _expectLineHasNativeSelection(WidgetTester tester, String selectedLine) {
+  if (_proxyHasSelectedContent(tester, selectedLine)) {
+    return;
+  }
+  if (_highlightedText(tester).contains(selectedLine)) {
+    return;
+  }
   for (final Element element in find.byType(RichText).evaluate()) {
     final RichText widget = element.widget as RichText;
     if (!widget.text.toPlainText().contains(selectedLine)) {
@@ -377,6 +517,25 @@ void _expectLineHasNativeSelection(WidgetTester tester, String selectedLine) {
     return;
   }
   throw StateError('No RichText RenderParagraph contains "$selectedLine".');
+}
+
+bool _proxyHasSelectedContent(WidgetTester tester, String selectedLine) {
+  for (final Element element in find
+      .byWidgetPredicate(
+        (Widget widget) =>
+            widget.runtimeType.toString() == '_SelectableInlineTextProxy',
+      )
+      .evaluate()) {
+    final RenderObject? renderObject = element.renderObject;
+    if (renderObject is! Selectable) {
+      continue;
+    }
+    final Selectable selectable = renderObject as Selectable;
+    if (selectable.getSelectedContent()?.plainText == selectedLine) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void _collectHighlightedText(InlineSpan span, StringBuffer out) {

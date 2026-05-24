@@ -142,18 +142,20 @@ typedef AnimatedMarkdownLatexBuilder = StreamingMarkdownLatexBuilder;
 /// Preferred public name for block override context.
 typedef AnimatedMarkdownBlockContext = StreamingMarkdownBlockBuildContext;
 
-/// Controls whether animated word tokens are merged back into static text after
-/// their reveal animation has completed.
+/// Controls whether animated word tokens shed their animation hosts after their
+/// reveal animation has completed.
 enum AnimatedMarkdownTokenCompaction {
   /// Keep the per-token widget spans for the lifetime of the rendered block.
   disabled,
 
-  /// Merge settled tokens only when the renderer can do so without changing
-  /// custom token animation or debug-token behavior.
+  /// Remove settled animation hosts once the reveal has completed, while
+  /// keeping token geometry stable so text wrapping does not jump.
+  ///
+  /// Debug-token rendering is kept expanded so token boundaries remain visible.
   automatic,
 
-  /// Merge settled tokens whenever possible, including when a custom token
-  /// animation builder is supplied.
+  /// Remove settled animation hosts whenever possible, including debug-token
+  /// rendering.
   always,
 }
 
@@ -296,7 +298,7 @@ class StreamingMarkdownThemeData {
   /// Text style used when a LaTeX expression cannot be parsed.
   final TextStyle? latexErrorTextStyle;
 
-  /// Selection highlight color used by selectable inline overlays.
+  /// Selection highlight color used by selectable text.
   final Color? selectionColor;
 }
 
