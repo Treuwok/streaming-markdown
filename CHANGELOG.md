@@ -1,3 +1,10 @@
+## Unreleased
+
+- Repository maintenance: normalized historical Git author and committer
+  metadata to `samnn152 <ngocsam.ngo@gmail.com>`. Earlier commits may have
+  appeared under other local Git identities for the same maintainer, including
+  `Ngô Ngọc Sâm`, `Sam Ngo Ngoc`, and machine-local `hider152` emails.
+
 ## 0.3.5
 
 - Hotfix pub.dev platform metadata to declare Flutter web support explicitly.
