@@ -1,14 +1,43 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/rendering.dart' show SelectedContent, SelectionStatus;
-import 'package:flutter/scheduler.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/rendering.dart'
+    show
+        LayerLink,
+        LeaderLayer,
+        PaintingContext,
+        PipelineOwner,
+        RenderObject,
+        RenderProxyBox,
+        DirectionallyExtendSelectionEvent,
+        GranularlyExtendSelectionEvent,
+        SelectedContent,
+        SelectedContentRange,
+        Selectable,
+        SelectWordSelectionEvent,
+        SelectionExtendDirection,
+        SelectionEdgeUpdateEvent,
+        SelectionEvent,
+        SelectionEventType,
+        SelectionGeometry,
+        SelectionPoint,
+        SelectionRegistrar,
+        SelectionResult,
+        SelectionStatus,
+        SelectionUtils,
+        TextGranularity;
 import 'package:flutter/services.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:html/dom.dart' as html_dom;
 import 'package:html/parser.dart' as html_parser;
 import 'dart:async';
 import 'dart:collection';
+import 'selection/web_copy_interceptor_stub.dart'
+    if (dart.library.html) 'selection/web_copy_interceptor_web.dart'
+    as web_copy;
 
+import '../copy/clipboard_handler.dart';
+import '../copy/selection_strategy.dart';
 import '../model/render_node.dart';
 import '../worker/parse_worker_stub.dart'
     if (dart.library.ffi) '../worker/parse_worker.dart';
@@ -35,9 +64,12 @@ part 'inline/spans.dart';
 part 'inline/markdown.dart';
 part 'inline/token_spans.dart';
 part 'selection/area.dart';
+part 'selection/inline_proxy.dart';
 part 'selection/model.dart';
 part 'selection/pieces.dart';
-part 'selection/overlay.dart';
+part '../copy/plain_text_extractor.dart';
+part '../copy/raw_markdown_extractor.dart';
+part '../copy/html_converter.dart';
 part 'animation/sequence.dart';
 part 'animation/sequence_state.dart';
 part 'animation/sequence_tokens.dart';
@@ -54,6 +86,12 @@ part 'html/inline.dart';
 /// This is the primary widget API starting in `0.3.0`. It renders parsed
 /// markdown [blocks] with stable block layout, token-level animation, optional
 /// selection, and markdown-aware copy behavior.
+///
+/// When selection is enabled, selectable text is backed by render proxies that
+/// resolve gestures to stable source ranges. Highlights are projected from
+/// those ranges, so selection remains anchored while streams append or an
+/// ancestor scrolls; table cells remain partially selectable and wide tables
+/// can auto-scroll during a drag.
 ///
 /// Use [StreamingMarkdownParseWorker.replace] or
 /// [StreamingMarkdownParseWorker.append] to produce the [MarkdownRenderNode]
@@ -80,6 +118,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     bool showTokenDebugColors = false,
     bool showCodeBlockCopyButton = false,
     bool enableSelection = false,
+    SelectionStrategy selectionStrategy = SelectionStrategy.rich,
     StreamingMarkdownThemeData theme = const StreamingMarkdownThemeData(),
     AnimatedMarkdownBlockBuilder? blockBuilder,
     AnimatedMarkdownImageBuilder? imageBuilder,
@@ -101,6 +140,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
           debugTokenHighlight: showTokenDebugColors,
           showCodeBlockCopyButton: showCodeBlockCopyButton,
           enableTextSelection: enableSelection,
+          selectionStrategy: selectionStrategy,
           markdownTheme: theme,
           customBlockBuilder: blockBuilder,
           customImageBuilder: imageBuilder,
@@ -140,6 +180,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     bool showTokenDebugColors = false,
     bool showCodeBlockCopyButton = false,
     bool enableSelection = false,
+    SelectionStrategy selectionStrategy = SelectionStrategy.rich,
     StreamingMarkdownThemeData theme = const StreamingMarkdownThemeData(),
     AnimatedMarkdownBlockBuilder? blockBuilder,
     AnimatedMarkdownImageBuilder? imageBuilder,
@@ -171,6 +212,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
       showTokenDebugColors: showTokenDebugColors,
       showCodeBlockCopyButton: showCodeBlockCopyButton,
       enableSelection: enableSelection,
+      selectionStrategy: selectionStrategy,
       theme: theme,
       blockBuilder: blockBuilder,
       imageBuilder: imageBuilder,
@@ -218,6 +260,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     this.debugTokenHighlight = false,
     this.showCodeBlockCopyButton = false,
     this.enableTextSelection = false,
+    this.selectionStrategy = SelectionStrategy.rich,
     this.markdownTheme = const StreamingMarkdownThemeData(),
     this.customBlockBuilder,
     this.customImageBuilder,
@@ -270,7 +313,8 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// Pauses token and block reveal scheduling without changing parser input.
   final bool tokenAnimationPaused;
 
-  /// Merges settled animated word tokens back into static text spans.
+  /// Merges settled animated word tokens back into static text spans without
+  /// changing their measured geometry or interrupting reveal animations.
   final AnimatedMarkdownTokenCompaction tokenCompaction;
 
   /// Paints token debug backgrounds to inspect token boundaries.
@@ -279,8 +323,17 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// Shows a copy button in fenced and indented code block headers.
   final bool showCodeBlockCopyButton;
 
-  /// Enables selectable text and markdown-aware copy behavior.
+  /// Enables render-backed selectable text and markdown-aware copy behavior.
+  ///
+  /// Selection stores stable source offsets rather than inferring a range from
+  /// overlaid visual text, preserving anchors during scrolling and streaming.
+  /// Dragging near a scroll edge automatically extends selection through the
+  /// scrollable viewport, including horizontal Markdown tables.
   final bool enableTextSelection;
+
+  /// Controls whether copied selections become plain text, raw markdown,
+  /// or rich HTML with a plain-text fallback.
+  final SelectionStrategy selectionStrategy;
 
   /// Theme data for markdown block styling.
   final StreamingMarkdownThemeData markdownTheme;
@@ -341,6 +394,192 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     return projection.markdownForSelectedPlainText(selectedPlainText);
   }
 
+  @visibleForTesting
+  static String debugPlainTextForSelectedPlainText({
+    required List<MarkdownRenderNode> nodes,
+    required String selectedPlainText,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final StreamingMarkdownRenderView view = StreamingMarkdownRenderView(
+      nodes: nodes,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    final List<MarkdownRenderNode> blocks =
+        view._collectRenderableBlocks(nodes);
+    final Map<String, String> linkReferences =
+        view._extractLinkReferences(nodes);
+    final Map<String, int> footnoteNumbers =
+        view._extractFootnoteNumbers(nodes);
+    final _MarkdownSelectionProjection projection =
+        view._buildSelectionProjection(
+      blocks,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    );
+    return projection.plainTextForSelectedPlainText(selectedPlainText);
+  }
+
+  @visibleForTesting
+  static String debugFullPlainText({
+    required List<MarkdownRenderNode> nodes,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final StreamingMarkdownRenderView view = StreamingMarkdownRenderView(
+      nodes: nodes,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    final List<MarkdownRenderNode> blocks =
+        view._collectRenderableBlocks(nodes);
+    final Map<String, String> linkReferences =
+        view._extractLinkReferences(nodes);
+    final Map<String, int> footnoteNumbers =
+        view._extractFootnoteNumbers(nodes);
+    final _MarkdownSelectionProjection projection =
+        view._buildSelectionProjection(
+      blocks,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    );
+    return projection.segments
+        .where(
+          (_MarkdownSelectionSegment segment) =>
+              segment.plainText.isNotEmpty || segment.markdownText.isNotEmpty,
+        )
+        .map((_MarkdownSelectionSegment segment) => segment.plainText)
+        .join('\n\n');
+  }
+
+  @visibleForTesting
+  static String debugHtmlForSelectedPlainText({
+    required List<MarkdownRenderNode> nodes,
+    required String selectedPlainText,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final String markdown = debugMarkdownForSelectedPlainText(
+      nodes: nodes,
+      selectedPlainText: selectedPlainText,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    if (markdown.isEmpty) {
+      return '';
+    }
+    return _selectedMarkdownToHtml(
+      markdown,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+  }
+
+  @visibleForTesting
+  static String debugMarkdownForSelectionRange({
+    required List<MarkdownRenderNode> nodes,
+    required int selectionStart,
+    required int selectionEnd,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final StreamingMarkdownRenderView view = StreamingMarkdownRenderView(
+      nodes: nodes,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    final List<MarkdownRenderNode> blocks =
+        view._collectRenderableBlocks(nodes);
+    final Map<String, String> linkReferences =
+        view._extractLinkReferences(nodes);
+    final Map<String, int> footnoteNumbers =
+        view._extractFootnoteNumbers(nodes);
+    final _MarkdownSelectionProjection projection =
+        view._buildSelectionProjection(
+      blocks,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    );
+    return projection.markdownForRange(
+      _MarkdownSelectionRange(start: selectionStart, end: selectionEnd),
+    );
+  }
+
+  @visibleForTesting
+  static (int, int)? debugMarkdownSourceRangeForSelectedPlainText({
+    required List<MarkdownRenderNode> nodes,
+    required String selectedPlainText,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final StreamingMarkdownRenderView view = StreamingMarkdownRenderView(
+      nodes: nodes,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    final List<MarkdownRenderNode> blocks =
+        view._collectRenderableBlocks(nodes);
+    final Map<String, String> linkReferences =
+        view._extractLinkReferences(nodes);
+    final Map<String, int> footnoteNumbers =
+        view._extractFootnoteNumbers(nodes);
+    final _MarkdownSelectionProjection projection =
+        view._buildSelectionProjection(
+      blocks,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    );
+    final _MarkdownSourceSelectionRange? range =
+        projection.sourceRangeForSelectedPlainText(selectedPlainText);
+    if (range == null) {
+      return null;
+    }
+    return (range.start, range.end);
+  }
+
+  @visibleForTesting
+  static String debugMarkdownForSourceRange({
+    required List<MarkdownRenderNode> nodes,
+    required int sourceStart,
+    required int sourceEnd,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final StreamingMarkdownRenderView view = StreamingMarkdownRenderView(
+      nodes: nodes,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    final List<MarkdownRenderNode> blocks =
+        view._collectRenderableBlocks(nodes);
+    final Map<String, String> linkReferences =
+        view._extractLinkReferences(nodes);
+    final Map<String, int> footnoteNumbers =
+        view._extractFootnoteNumbers(nodes);
+    final _MarkdownSelectionProjection projection =
+        view._buildSelectionProjection(
+      blocks,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    );
+    return projection.markdownForSourceRange(
+      _MarkdownSourceSelectionRange(start: sourceStart, end: sourceEnd),
+    );
+  }
+
+  @visibleForTesting
+  static String debugFullHtml({
+    required List<MarkdownRenderNode> nodes,
+    bool allowUnclosedInlineDelimiters = false,
+  }) {
+    final StreamingMarkdownRenderView view = StreamingMarkdownRenderView(
+      nodes: nodes,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+    );
+    final List<MarkdownRenderNode> blocks =
+        view._collectRenderableBlocks(nodes);
+    final Map<String, String> linkReferences =
+        view._extractLinkReferences(nodes);
+    final Map<String, int> footnoteNumbers =
+        view._extractFootnoteNumbers(nodes);
+    final _MarkdownHtmlSelectionConverter converter =
+        _MarkdownHtmlSelectionConverter(
+      view: view,
+      blocks: blocks,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    );
+    return converter.convert();
+  }
+
   @override
   Widget build(BuildContext context) {
     final List<MarkdownRenderNode> blocks = _collectRenderableBlocks(nodes);
@@ -362,6 +601,18 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     final String refsDigest = _linkReferencesDigest(linkReferences);
     final String renderConfigDigest = _renderConfigDigest(context);
     final bool compactSettledTokens = _shouldCompactSettledTokens();
+    final bool selectionEnabled = enableTextSelection && !sliver;
+    final _MarkdownSelectionProjection? selectionProjection = selectionEnabled
+        ? _buildSelectionProjection(
+            blocks,
+            linkReferences: linkReferences,
+            footnoteNumbers: footnoteNumbers,
+          )
+        : null;
+    final Map<String, _MarkdownSelectionBlockRange> blockRanges =
+        selectionProjection == null
+            ? const <String, _MarkdownSelectionBlockRange>{}
+            : _buildSelectionBlockRanges(blocks, selectionProjection);
 
     final Widget content = _SequencedBlockList(
       blocks: blocks,
@@ -369,13 +620,12 @@ class StreamingMarkdownRenderView extends StatelessWidget {
       padding: padding,
       blockSpacing: markdownTheme.blockSpacing,
       tokenArrivalDelay: tokenArrivalDelay,
-      tokenFadeDuration: _resolvedTokenFadeInDuration(),
       paused: tokenAnimationPaused,
       onWait: onTokenArrivalWait,
       onSequenceSettled: onSequenceSettled,
       blockIdentityBuilder: _blockIdentity,
       blockBuilder: (BuildContext context, MarkdownRenderNode block) {
-        return _BlockRenderHost(
+        Widget renderedBlock = _BlockRenderHost(
           key: ValueKey<String>(_blockIdentity(block)),
           signature: _blockSignature(
             block,
@@ -389,20 +639,79 @@ class StreamingMarkdownRenderView extends StatelessWidget {
           compactionDelay: _tokenCompactionDelay(block),
           builder: _buildRenderedBlockWithRefs,
         );
+        final _MarkdownSelectionBlockRange? blockRange =
+            blockRanges[_blockIdentity(block)];
+        if (blockRange != null) {
+          renderedBlock = _MarkdownSelectionBlockVisualScope(
+            blockRange: blockRange,
+            child: renderedBlock,
+          );
+        }
+        return renderedBlock;
       },
     );
 
-    if (!enableTextSelection || sliver) {
+    if (!selectionEnabled) {
       return content;
     }
     return _MarkdownSelectionArea(
-      projection: _buildSelectionProjection(
-        blocks,
-        linkReferences: linkReferences,
-        footnoteNumbers: footnoteNumbers,
-      ),
+      projection: selectionProjection!,
+      selectionStrategy: selectionStrategy,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+      selectionColor: markdownTheme.selectionColor ?? const Color(0x6658A6FF),
+      useSourceSelectionVisual: true,
+      lockFinalizedSelectionVisual: _shouldLockFinalizedSelectionVisual(),
       child: content,
     );
+  }
+
+  bool _shouldLockFinalizedSelectionVisual() {
+    return tokenArrivalDelay > Duration.zero ||
+        _resolvedTokenFadeInDuration() > Duration.zero ||
+        tokenAnimationBuilder != null ||
+        tokenAnimationPaused;
+  }
+
+  Map<String, _MarkdownSelectionBlockRange> _buildSelectionBlockRanges(
+    List<MarkdownRenderNode> blocks,
+    _MarkdownSelectionProjection projection,
+  ) {
+    final Map<String, _MarkdownSelectionBlockRange> ranges =
+        <String, _MarkdownSelectionBlockRange>{};
+    int sourceCursor = 0;
+    int plainCursor = 0;
+    int compactCursor = 0;
+    for (int i = 0; i < blocks.length && i < projection.segments.length; i++) {
+      if (i > 0) {
+        sourceCursor += 2;
+        plainCursor += 2;
+      }
+      final _MarkdownSelectionSegment segment = projection.segments[i];
+      final int sourceStart = sourceCursor;
+      final int sourceEnd = sourceStart + segment.markdownText.length;
+      final int plainStart = plainCursor;
+      final int plainEnd = plainStart + segment.plainText.length;
+      final int compactStart = compactCursor;
+      final int compactEnd = compactStart + segment.plainText.length;
+      ranges[_blockIdentity(blocks[i])] = _MarkdownSelectionBlockRange(
+        sourceRange: _MarkdownSourceSelectionRange(
+          start: sourceStart,
+          end: sourceEnd,
+        ),
+        plainRange: _MarkdownSelectionRange(
+          start: plainStart,
+          end: plainEnd,
+        ),
+        compactRange: _MarkdownSelectionRange(
+          start: compactStart,
+          end: compactEnd,
+        ),
+      );
+      sourceCursor = sourceEnd;
+      plainCursor = plainEnd;
+      compactCursor = compactEnd;
+    }
+    return ranges;
   }
 
   bool _shouldCompactSettledTokens() {
@@ -410,7 +719,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
       return false;
     }
     if (tokenCompaction == AnimatedMarkdownTokenCompaction.automatic &&
-        (debugTokenHighlight || tokenAnimationBuilder != null)) {
+        debugTokenHighlight) {
       return false;
     }
     return true;

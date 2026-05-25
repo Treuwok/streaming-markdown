@@ -1,3 +1,24 @@
+## Unreleased
+
+## 0.3.6
+
+- Replace overlay-derived selection tracking with render-backed absolute range
+  selection, keeping anchors stable through streaming and viewport scrolling.
+- Support partial text selection inside tables, selection continuation across
+  table boundaries, and vertical/horizontal edge auto-scroll while dragging.
+- Compact settled animated tokens into lighter static spans without shifting
+  rendered layout, preserving the established word-by-word animation behavior.
+- Add the `Gravity` example animation while restoring `Fade` as the default
+  example preset.
+- Refresh the README/demo video, package API documentation, website
+  documentation, and forward roadmap for performance and requested features.
+- Remove stale preview and internal validation artifacts from published package
+  contents.
+- Repository maintenance: normalized historical Git author and committer
+  metadata to `samnn152 <ngocsam.ngo@gmail.com>`. Earlier commits may have
+  appeared under other local Git identities for the same maintainer, including
+  `Ngô Ngọc Sâm`, `Sam Ngo Ngoc`, and machine-local `hider152` emails.
+
 ## 0.3.5
 
 - Hotfix pub.dev platform metadata to declare Flutter web support explicitly.

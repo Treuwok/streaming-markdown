@@ -147,11 +147,14 @@ extension _StreamingMarkdownMetadataRenderer on StreamingMarkdownRenderView {
       footnoteNumbers: footnoteNumbers,
     );
 
-    return RichText(
-      textAlign: TextAlign.left,
-      textDirection: TextDirection.ltr,
-      textScaler: MediaQuery.textScalerOf(context),
-      text: TextSpan(style: bodyStyle, children: spans),
+    return MouseRegion(
+      cursor: SystemMouseCursors.text,
+      child: RichText(
+        textAlign: TextAlign.left,
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+        text: TextSpan(style: bodyStyle, children: spans),
+      ),
     );
   }
 }

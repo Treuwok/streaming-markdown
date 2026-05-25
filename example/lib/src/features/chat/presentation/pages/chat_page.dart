@@ -25,6 +25,8 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
+  static const int _defaultTokenAnimationPresetIndex = 0;
+
   final TextEditingController _messageController = TextEditingController();
   final TextEditingController _modelController = TextEditingController();
   final TextEditingController _baseUrlController = TextEditingController();
@@ -37,7 +39,9 @@ class _ChatPageState extends State<ChatPage> {
   double _firstNodeDelayMs = 0;
   double _animationDurationMs = 150;
   Curve _animationCurve = Curves.easeOut;
-  _TokenAnimationPreset _tokenAnimationPreset = _tokenAnimationPresets.first;
+  _TokenAnimationPreset _tokenAnimationPreset =
+      _tokenAnimationPresets[_defaultTokenAnimationPresetIndex];
+  SelectionStrategy _selectionStrategy = SelectionStrategy.rich;
 
   @override
   void initState() {
@@ -150,6 +154,7 @@ class _ChatPageState extends State<ChatPage> {
                   animationDurationMs: _animationDurationMs,
                   animationCurve: _animationCurve,
                   tokenAnimationPreset: _tokenAnimationPreset,
+                  selectionStrategy: _selectionStrategy,
                   onStaggerDelayChanged: (double value) {
                     setState(() {
                       _staggerDelayMs = value;
@@ -175,6 +180,11 @@ class _ChatPageState extends State<ChatPage> {
                       _tokenAnimationPreset = value;
                     });
                   },
+                  onSelectionStrategyChanged: (SelectionStrategy value) {
+                    setState(() {
+                      _selectionStrategy = value;
+                    });
+                  },
                   onProviderChanged: _setProvider,
                 );
                 final Widget chat = _ChatSurface(
@@ -197,6 +207,7 @@ class _ChatPageState extends State<ChatPage> {
                     label:
                         '${_staggerDelayMs.round()} ms/token • ${_tokenAnimationPreset.name}',
                   ),
+                  selectionStrategy: _selectionStrategy,
                   onSubmit: _submit,
                   onNewContent: _scrollToEnd,
                 );
@@ -303,11 +314,39 @@ final List<_TokenAnimationPreset> _tokenAnimationPresets =
       _TokenAnimationPreset(
         name: 'Rotate in',
         builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
-          final double t = Curves.easeOutQuart.transform(token.value);
-          return Transform.rotate(
-            angle: (1 - t) * -0.16,
-            alignment: Alignment.bottomLeft,
-            child: Opacity(opacity: token.value, child: token.child),
+          final double t = Curves.easeOutBack.transform(token.value);
+          return Opacity(
+            opacity: Curves.easeOut.transform(token.value),
+            child: Transform.translate(
+              offset: Offset((1 - t) * -10, 0),
+              child: Transform.rotate(
+                angle: (1 - t) * -0.42,
+                alignment: Alignment.bottomLeft,
+                child: Transform.scale(
+                  scale: 0.94 + (0.06 * t),
+                  alignment: Alignment.bottomLeft,
+                  child: token.child,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+      _TokenAnimationPreset(
+        name: 'Gravity',
+        builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
+          final double fall = Curves.bounceOut.transform(token.value);
+          final double fade = Curves.easeOutCubic.transform(token.value);
+          return Opacity(
+            opacity: fade,
+            child: Transform.translate(
+              offset: Offset(0, -64 * (1 - fall)),
+              child: Transform.scale(
+                scale: 0.96 + (0.04 * fall),
+                alignment: Alignment.bottomCenter,
+                child: token.child,
+              ),
+            ),
           );
         },
       ),
@@ -326,6 +365,23 @@ final List<_TokenAnimationPreset> _tokenAnimationPresets =
       ),
     ];
 
+const List<SelectionStrategy> _selectionStrategies = <SelectionStrategy>[
+  SelectionStrategy.rich,
+  SelectionStrategy.raw,
+  SelectionStrategy.plain,
+];
+
+String _selectionStrategyLabel(SelectionStrategy strategy) {
+  switch (strategy) {
+    case SelectionStrategy.rich:
+      return 'Rich HTML';
+    case SelectionStrategy.raw:
+      return 'Raw Markdown';
+    case SelectionStrategy.plain:
+      return 'Plain text';
+  }
+}
+
 class _SettingsPanel extends StatelessWidget {
   const _SettingsPanel({
     required this.settings,
@@ -339,11 +395,13 @@ class _SettingsPanel extends StatelessWidget {
     required this.animationDurationMs,
     required this.animationCurve,
     required this.tokenAnimationPreset,
+    required this.selectionStrategy,
     required this.onStaggerDelayChanged,
     required this.onFirstNodeDelayChanged,
     required this.onAnimationDurationChanged,
     required this.onAnimationCurveChanged,
     required this.onTokenAnimationPresetChanged,
+    required this.onSelectionStrategyChanged,
     required this.onProviderChanged,
   });
 
@@ -358,11 +416,13 @@ class _SettingsPanel extends StatelessWidget {
   final double animationDurationMs;
   final Curve animationCurve;
   final _TokenAnimationPreset tokenAnimationPreset;
+  final SelectionStrategy selectionStrategy;
   final ValueChanged<double> onStaggerDelayChanged;
   final ValueChanged<double> onFirstNodeDelayChanged;
   final ValueChanged<double> onAnimationDurationChanged;
   final ValueChanged<Curve> onAnimationCurveChanged;
   final ValueChanged<_TokenAnimationPreset> onTokenAnimationPresetChanged;
+  final ValueChanged<SelectionStrategy> onSelectionStrategyChanged;
   final ValueChanged<ChatProvider> onProviderChanged;
 
   @override
@@ -516,6 +576,28 @@ class _SettingsPanel extends StatelessWidget {
               : null,
         ),
         const SizedBox(height: 16),
+        DropdownButtonFormField<SelectionStrategy>(
+          initialValue: selectionStrategy,
+          decoration: const InputDecoration(
+            labelText: 'Copy strategy',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.copy_all_outlined),
+          ),
+          items: _selectionStrategies.map((SelectionStrategy strategy) {
+            return DropdownMenuItem<SelectionStrategy>(
+              value: strategy,
+              child: Text(_selectionStrategyLabel(strategy)),
+            );
+          }).toList(),
+          onChanged: enabled
+              ? (SelectionStrategy? value) {
+                  if (value != null) {
+                    onSelectionStrategyChanged(value);
+                  }
+                }
+              : null,
+        ),
+        const SizedBox(height: 16),
         Text(
           _providerHint(settings.provider),
           style: Theme.of(context).textTheme.bodySmall,
@@ -546,6 +628,7 @@ class _ChatSurface extends StatefulWidget {
     required this.settings,
     required this.markdownTheme,
     required this.renderTiming,
+    required this.selectionStrategy,
     required this.onSubmit,
     required this.onNewContent,
   });
@@ -555,6 +638,7 @@ class _ChatSurface extends StatefulWidget {
   final ChatConnectionSettings settings;
   final AnimatedMarkdownThemeData markdownTheme;
   final _ChatRenderTiming renderTiming;
+  final SelectionStrategy selectionStrategy;
   final VoidCallback onSubmit;
   final VoidCallback onNewContent;
 
@@ -677,6 +761,7 @@ class _ChatSurfaceState extends State<_ChatSurface> {
                     message: message,
                     markdownTheme: widget.markdownTheme,
                     renderTiming: widget.renderTiming,
+                    selectionStrategy: widget.selectionStrategy,
                     onAssistantSettled: () {
                       _markAssistantSettled(message.id);
                     },
@@ -858,12 +943,14 @@ class _MessageBubble extends StatelessWidget {
     required this.message,
     required this.markdownTheme,
     required this.renderTiming,
+    required this.selectionStrategy,
     required this.onAssistantSettled,
   });
 
   final ChatMessage message;
   final AnimatedMarkdownThemeData markdownTheme;
   final _ChatRenderTiming renderTiming;
+  final SelectionStrategy selectionStrategy;
   final VoidCallback onAssistantSettled;
 
   @override
@@ -896,7 +983,8 @@ class _MessageBubble extends StatelessWidget {
                   tokenAnimationCurve: renderTiming.tokenAnimationCurve,
                   tokenAnimationBuilder: renderTiming.tokenAnimationBuilder,
                   responseComplete: message.complete,
-                  enableSelection: false,
+                  enableSelection: true,
+                  selectionStrategy: selectionStrategy,
                   onRenderSettled: onAssistantSettled,
                   theme: markdownTheme,
                 ),
@@ -917,6 +1005,7 @@ class _AssistantMarkdownBubble extends StatefulWidget {
     required this.tokenAnimationBuilder,
     required this.responseComplete,
     required this.enableSelection,
+    required this.selectionStrategy,
     required this.onRenderSettled,
     required this.theme,
   });
@@ -929,6 +1018,7 @@ class _AssistantMarkdownBubble extends StatefulWidget {
   final StreamingMarkdownTokenAnimationBuilder tokenAnimationBuilder;
   final bool responseComplete;
   final bool enableSelection;
+  final SelectionStrategy selectionStrategy;
   final VoidCallback onRenderSettled;
   final AnimatedMarkdownThemeData theme;
 
@@ -1267,6 +1357,7 @@ class _AssistantMarkdownBubbleState extends State<_AssistantMarkdownBubble> {
         tokenAnimationCurve: widget.tokenAnimationCurve,
         tokenAnimationBuilder: widget.tokenAnimationBuilder,
         enableSelection: widget.enableSelection,
+        selectionStrategy: widget.selectionStrategy,
         showCodeBlockCopyButton: true,
         theme: widget.theme,
       ),

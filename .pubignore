@@ -3,6 +3,10 @@ build/
 .idea/
 .DS_Store
 *.iml
+coverage/
+assets/proof/
+test/render/artifacts/
+test/render/failures/
 docs/
 docs.json
 website/

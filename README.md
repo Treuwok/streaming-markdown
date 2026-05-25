@@ -1,5 +1,11 @@
 <a id="readme-top"></a>
 
+<p align="center">
+  <a href="https://samnn.dev/live-chat-demo">
+    <img src="https://samnn.dev/img/preview/chat-demo.gif" alt="animated_streaming_markdown chatbot demo with render-backed selection" width="720">
+  </a>
+</p>
+
 [![Contributors][contributors-shield]][contributors-url]
 [![Forks][forks-shield]][forks-url]
 [![Stargazers][stars-shield]][stars-url]
@@ -30,20 +36,14 @@
   </p>
 </div>
 
-<p align="center">
-  <a href="https://pub.dev/packages/animated_streaming_markdown">
-    <video src="assets/preview/chat-demo.mp4" poster="assets/preview/chat-demo-screenshot.png" width="720" autoplay muted loop playsinline controls>
-      animated_streaming_markdown chatbot demo
-    </video>
-  </a>
-</p>
-
 ## Latest Update
 
+- **0.3.6 selection architecture**: selection is now projected from stable source ranges through render-backed selectable text, including partial cell selection and cross-block table drags.
+- **Selection auto-scroll**: dragging at viewport edges scrolls vertically, while wide tables also scroll horizontally near their left and right edges.
+- **Animation without layout jolts**: settled word tokens compact into lighter static spans while preserving token geometry; the example defaults to the original `Fade` preset and also includes `Gravity`.
 - **Flutter web is first-class**: published builds include the generated Tree-sitter WASM parser asset, so app developers do not need to edit `web/index.html` or copy files manually.
 - **KaTeX-style LaTeX rendering**: inline `$...$` / `\(...\)` and display `$$...$$` / `\[...\]` math now render through `flutter_math_fork`, a pure Dart/Flutter KaTeX parser and renderer.
 - **Real chatbot example**: the example app can connect to local Ollama plus ChatGPT/OpenAI, Claude, Gemini, and Grok-compatible cloud APIs.
-- **0.3.5 hotfix**: pub.dev platform metadata now explicitly declares Flutter web support to match the shipped WASM-backed implementation.
 
 <details>
   <summary>Table of Contents</summary>
@@ -105,7 +105,7 @@ It is designed for chat-like or streaming text interfaces where markdown arrives
 1. Add dependency:
    ```yaml
    dependencies:
-    animated_streaming_markdown: ^0.3.5
+    animated_streaming_markdown: ^0.3.6
    ```
 2. Install packages:
    ```sh
@@ -136,18 +136,11 @@ AnimatedStreamingMarkdown(
   tokenStaggerDelay: const Duration(milliseconds: 180),
   tokenAnimationDuration: const Duration(milliseconds: 240),
   enableSelection: true,
-  tokenAnimationBuilder: (
-    BuildContext context,
-    AnimatedMarkdownToken token,
-  ) {
-    final t = Curves.easeOutCubic.transform(token.value);
-    return Transform.translate(
-      offset: Offset(0, (1 - t) * 8),
-      child: Opacity(opacity: t, child: token.child),
-    );
-  },
 );
 ```
+
+The built-in animation is a `Fade` reveal. Supply `tokenAnimationBuilder` only
+when opting into a custom effect such as Gravity or Rotate in.
 
 ### 3) Render LaTeX math with KaTeX-compatible syntax
 
@@ -194,9 +187,11 @@ AnimatedStreamingMarkdown(
   - `tokenStaggerDelay`
   - `tokenAnimationDuration` / `tokenAnimationDurationFactor`
   - `tokenAnimationBuilder`
+  - `tokenCompaction`
   - `onTokenDelay`
   - `showCodeBlockCopyButton`
   - `enableSelection`
+  - `selectionStrategy`
   - `blockBuilder`
   - `imageBuilder`
   - `latexBuilder`
@@ -265,8 +260,9 @@ the package behavior more directly:
 - Done: Convenience constructors and sync parser helpers
 - Done: Opt-in code block copy button
 - Done: KaTeX-compatible LaTeX math rendering
-- Planned: Richer copy modes and improved multi-content drag selection
-- Planned: More parser/renderer benchmark scenarios
+- Done: Render-backed selection with stable ranges, table traversal, and edge auto-scroll
+- Next: Performance optimization across parser, rendering, token compaction, and benchmarks
+- Next: Feature development guided by real application requirements and user requests
 
 See the [open issues][issues-url] for proposed features and known issues.
 

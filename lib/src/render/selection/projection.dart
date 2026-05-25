@@ -10,7 +10,7 @@ extension _StreamingMarkdownSelectionProjectionBuilder
     final List<_MarkdownSelectionSegment> segments =
         <_MarkdownSelectionSegment>[];
     for (final MarkdownRenderNode block in blocks) {
-      final String raw = _normalizedRaw(block.raw);
+      final String raw = _selectionRaw(block.raw);
       switch (block.type) {
         case 'atx_heading':
         case 'setext_heading':
@@ -25,7 +25,7 @@ extension _StreamingMarkdownSelectionProjectionBuilder
         case 'paragraph':
           segments.add(
             _inlineSelectionSegment(
-              _paragraphText(block).replaceAll('\n', ' '),
+              _selectionParagraphText(block),
               markdownText: raw,
               linkReferences: linkReferences,
               footnoteNumbers: footnoteNumbers,
@@ -107,6 +107,18 @@ extension _StreamingMarkdownSelectionProjectionBuilder
     return _MarkdownSelectionProjection(segments);
   }
 
+  String _selectionParagraphText(MarkdownRenderNode node) {
+    final String raw = _selectionRaw(node.raw);
+    if (raw.trim().isNotEmpty) {
+      return raw.replaceAll('\n', ' ');
+    }
+    return node.content;
+  }
+
+  String _selectionRaw(String raw) {
+    return raw.replaceAll('\r', '').replaceFirst(RegExp(r'\n+$'), '');
+  }
+
   _MarkdownSelectionSegment _tableSelectionSegment(
     String raw, {
     required Map<String, String> linkReferences,
@@ -151,24 +163,27 @@ extension _StreamingMarkdownSelectionProjectionBuilder
       );
     }
 
-    for (int columnIndex = 0;
-        columnIndex < table.headers.length;
-        columnIndex++) {
-      appendCell(
-        rowIndex: 0,
-        columnIndex: columnIndex,
-        markdown: table.headers[columnIndex],
-      );
-    }
-    for (int rowIndex = 0; rowIndex < table.rows.length; rowIndex++) {
-      final List<String> row = table.rows[rowIndex];
-      for (int columnIndex = 0; columnIndex < row.length; columnIndex++) {
+    void appendRow({
+      required int rowIndex,
+      required List<String> row,
+    }) {
+      for (int columnIndex = 0;
+          columnIndex < table.headers.length;
+          columnIndex++) {
+        if (columnIndex >= row.length) {
+          continue;
+        }
         appendCell(
-          rowIndex: rowIndex + 1,
+          rowIndex: rowIndex,
           columnIndex: columnIndex,
           markdown: row[columnIndex],
         );
       }
+    }
+
+    appendRow(rowIndex: 0, row: table.headers);
+    for (int rowIndex = 0; rowIndex < table.rows.length; rowIndex++) {
+      appendRow(rowIndex: rowIndex + 1, row: table.rows[rowIndex]);
     }
 
     final String plainText =
