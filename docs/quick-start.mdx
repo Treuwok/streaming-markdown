@@ -35,6 +35,9 @@ AnimatedStreamingMarkdown(
 );
 ```
 
+The renderer's default token effect is a Fade reveal. Set
+`tokenAnimationBuilder` only when your product wants another motion style.
+
 Dispose the parser when the stream is finished:
 
 ```dart
@@ -100,3 +103,10 @@ AnimatedStreamingMarkdown(
   },
 );
 ```
+
+## Selection During Scroll
+
+When `enableSelection` is active, selection is stored as stable Markdown source
+offsets. Dragging near a vertical viewport edge auto-scrolls the surrounding
+scrollable; dragging inside an overflowed table near its left or right edge
+auto-scrolls that table so the range can keep growing.

@@ -60,6 +60,31 @@ extension _StreamingMarkdownSelectionInlineBuilder
     );
   }
 
+  int _inlineSelectionPlainTextLength(
+    String text, {
+    required Map<String, String> linkReferences,
+    required Map<String, int> footnoteNumbers,
+  }) {
+    return _inlineSelectionPlainText(
+      text,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    ).length;
+  }
+
+  String _inlineSelectionPlainText(
+    String text, {
+    required Map<String, String> linkReferences,
+    required Map<String, int> footnoteNumbers,
+  }) {
+    return _inlineSelectionSegment(
+      text,
+      markdownText: text,
+      linkReferences: linkReferences,
+      footnoteNumbers: footnoteNumbers,
+    ).plainText;
+  }
+
   String _semanticMarkdownForInlineToken(_InlineToken token) {
     if (token.sourceMarkdown != token.text) {
       return token.sourceMarkdown;

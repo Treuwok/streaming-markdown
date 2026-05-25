@@ -5,7 +5,7 @@ description: Markdown-aware copy behavior for selected rendered content.
 
 # Selection Copy
 
-Set `enableSelection` to wrap the renderer in a selection area:
+Set `enableSelection` to enable render-backed selection:
 
 ```dart
 AnimatedStreamingMarkdown(
@@ -28,10 +28,21 @@ Supported copy behavior includes:
 - HTML blocks.
 - Footnote references and definitions.
 
-## Current Scope
+## Stable Drag Selection
 
-Selection copy is designed for normal rendered Markdown content. More advanced
-copy modes, image copy, and broader drag selection behavior are planned for the
-0.3.x line.
+Selection endpoints are stored as absolute source offsets, then projected to
+the text rectangles currently on screen. This keeps a chosen range anchored
+while streaming appends content or an ancestor scrolls.
+
+The renderer supports:
+
+- Partial text selection inside individual table cells.
+- Dragging selection across a table into blocks above or below it.
+- Vertical auto-scroll near a containing viewport edge.
+- Horizontal auto-scroll near either edge of a wide table.
+
+Use `selectionStrategy` to choose `plain`, `markdown`, or `rich` clipboard
+content. Further performance tuning and feature additions will follow real
+application needs and user requests.
 
 See [Roadmap](/roadmap) for the current planning notes.

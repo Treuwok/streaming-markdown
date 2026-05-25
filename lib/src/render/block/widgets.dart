@@ -27,9 +27,16 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
     final Duration resolvedTokenStep =
         scheduleScope?.tokenArrivalDelay ?? tokenArrivalDelay;
     int tokenStartIndex = 0;
+    int plainTextStart = 0;
     final List<Widget> children = <Widget>[];
     for (int i = 0; i < parsed.items.length; i++) {
       final _ParsedListItem item = parsed.items[i];
+      final int itemPlainTextStart = plainTextStart;
+      final int itemPlainTextLength = _inlineSelectionPlainTextLength(
+        item.text,
+        linkReferences: linkReferences,
+        footnoteNumbers: footnoteNumbers,
+      );
       final Widget itemRow = Padding(
         key: ValueKey<String>('list_item_${item.stableKey}'),
         padding: EdgeInsets.only(left: item.level * 18.0),
@@ -47,6 +54,7 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
                 context,
                 item.text,
                 tokenStartIndex: tokenStartIndex,
+                plainTextStart: itemPlainTextStart,
                 baseStyle: baseStyle,
                 linkReferences: linkReferences,
                 footnoteNumbers: footnoteNumbers,
@@ -70,8 +78,10 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
         item.text,
         linkReferences: linkReferences,
       );
+      plainTextStart += itemPlainTextLength;
       if (i < parsed.items.length - 1) {
         children.add(const SizedBox(height: 4));
+        plainTextStart += 1;
       }
     }
 
@@ -182,16 +192,20 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
                           ),
                   ),
                   if (showCodeBlockCopyButton)
-                    IconButton(
-                      tooltip: 'Copy code',
-                      visualDensity: VisualDensity.compact,
-                      iconSize: 18,
-                      color: markdownTheme.codeBlockLanguageTextStyle?.color ??
-                          const Color(0xFF8B949E),
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: code));
-                      },
-                      icon: const Icon(Icons.copy_all_outlined),
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: IconButton(
+                        tooltip: 'Copy code',
+                        visualDensity: VisualDensity.compact,
+                        iconSize: 18,
+                        color:
+                            markdownTheme.codeBlockLanguageTextStyle?.color ??
+                                const Color(0xFF8B949E),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: code));
+                        },
+                        icon: const Icon(Icons.copy_all_outlined),
+                      ),
                     ),
                 ],
               ),
@@ -237,11 +251,17 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
       animatePerWord: !compacted,
     );
 
-    return RichText(
-      textAlign: TextAlign.left,
-      textDirection: TextDirection.ltr,
-      textScaler: MediaQuery.textScalerOf(context),
-      text: TextSpan(style: style, children: spans),
+    return MouseRegion(
+      cursor: SystemMouseCursors.text,
+      child: RichText(
+        textAlign: TextAlign.left,
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+        selectionRegistrar:
+            enableTextSelection ? SelectionContainer.maybeOf(context) : null,
+        selectionColor: markdownTheme.selectionColor ?? const Color(0x6658A6FF),
+        text: TextSpan(style: style, children: spans),
+      ),
     );
   }
 }

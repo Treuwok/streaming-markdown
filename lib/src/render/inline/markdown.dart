@@ -6,6 +6,7 @@ extension _StreamingMarkdownInlineMarkdownRenderer
     BuildContext context,
     String text, {
     int tokenStartIndex = 0,
+    int plainTextStart = 0,
     TextStyle? baseStyle,
     Map<String, String> linkReferences = const <String, String>{},
     Map<String, int> footnoteNumbers = const <String, int>{},
@@ -19,7 +20,6 @@ extension _StreamingMarkdownInlineMarkdownRenderer
         markdownTheme.paragraphTextStyle ??
         Theme.of(context).textTheme.bodyLarge ??
         const TextStyle(fontSize: 16);
-    final bool showSelectionOverlay = enableTextSelection;
     final bool compacted = _TokenCompactionScope.isCompacted(context);
     final bool animatePerWord = !compacted;
     final List<_InlineToken> tokens = _parseInlineTokens(
@@ -30,6 +30,15 @@ extension _StreamingMarkdownInlineMarkdownRenderer
     if (tokens.isEmpty) {
       return Text(normalized, style: resolvedStyle);
     }
+    final String selectableText = _plainTextForVisualInlineTokens(
+      tokens,
+      footnoteNumbers: footnoteNumbers,
+    );
+    final TextSpan selectionText = _selectionTextSpanForInlineTokens(
+      tokens,
+      resolvedStyle,
+      footnoteNumbers: footnoteNumbers,
+    );
     final Duration tokenFadeDuration = _resolvedTokenFadeInDuration();
     final Duration tokenStaggerDelay = tokenArrivalDelay;
     final _RevealScheduleScope? scheduleScope = _RevealScheduleScope.maybeOf(
@@ -38,6 +47,15 @@ extension _StreamingMarkdownInlineMarkdownRenderer
     final DateTime? tokenScheduleOrigin = scheduleScope?.revealedAt;
     final Duration resolvedTokenStep =
         scheduleScope?.tokenArrivalDelay ?? tokenStaggerDelay;
+    final _MarkdownSelectionRange? sourceVisualRange =
+        _sourceSelectionVisualRangeForInline(
+      context,
+      selectableText.length,
+      plainTextStart: plainTextStart,
+    );
+    final Color? sourceVisualColor = sourceVisualRange == null
+        ? null
+        : _MarkdownSourceSelectionVisualScope.maybeOf(context)?.selectionColor;
 
     final List<InlineSpan> spans = <InlineSpan>[];
     int visualTokenIndex = tokenStartIndex;
@@ -169,9 +187,7 @@ extension _StreamingMarkdownInlineMarkdownRenderer
           tokenScheduleOrigin: tokenScheduleOrigin,
           tokenAnimationBuilder: tokenAnimationBuilder,
           animatePerWord: animatePerWord,
-          onTap: showSelectionOverlay
-              ? null
-              : () => _onLinkPressed(context, token.linkUrl!),
+          onTap: () => _onLinkPressed(context, token.linkUrl!),
         );
         continue;
       }
@@ -190,26 +206,51 @@ extension _StreamingMarkdownInlineMarkdownRenderer
     }
 
     final TextScaler textScaler = MediaQuery.textScalerOf(context);
+    final _MarkdownSelectionBlockRange? selectionBlockRange =
+        _MarkdownSelectionBlockVisualScope.maybeOf(context)?.blockRange;
+    final int absolutePlainTextStart =
+        (selectionBlockRange?.plainRange.start ?? 0) + plainTextStart;
+    final int compactPlainTextStart =
+        (selectionBlockRange?.compactRange.start ?? absolutePlainTextStart) +
+            plainTextStart;
+    final _MarkdownInlineSelectionRegistry? inlineSelectionRegistry =
+        _MarkdownInlineSelectionRegistryScope.maybeOf(context);
     final Widget animatedRichText = RichText(
       textAlign: TextAlign.left,
       textDirection: TextDirection.ltr,
       textScaler: textScaler,
       text: TextSpan(style: resolvedStyle, children: spans),
     );
-    final Widget output = !showSelectionOverlay
+    final Widget selectableOutput = !enableTextSelection
         ? animatedRichText
-        : _SelectionAwareInlineStack(
-            animatedLayer: animatedRichText,
-            selectableLayer: _SelectableInlineTextOverlay(
-              tokens: tokens,
-              baseStyle: resolvedStyle,
-              footnoteNumbers: footnoteNumbers,
-              textScaler: textScaler,
-              selectionColor:
-                  markdownTheme.selectionColor ?? const Color(0x6658A6FF),
-              onLinkTap: (String url) => _onLinkPressed(context, url),
+        : _SelectableInlineTextProxy(
+            plainText: selectableText,
+            absolutePlainTextStart: absolutePlainTextStart,
+            compactPlainTextStart: compactPlainTextStart,
+            text: selectionText,
+            textDirection: TextDirection.ltr,
+            textScaler: textScaler,
+            registrar: SelectionContainer.maybeOf(context),
+            selectionRegistry: inlineSelectionRegistry,
+            child: SelectionContainer.disabled(
+              child: _InlineSourceSelectionBackdrop(
+                range: sourceVisualRange,
+                selectedText: _selectedTextForRange(
+                  selectableText,
+                  sourceVisualRange,
+                ),
+                text: selectionText,
+                textDirection: TextDirection.ltr,
+                textScaler: textScaler,
+                selectionColor: sourceVisualColor,
+                child: animatedRichText,
+              ),
             ),
           );
+    final Widget output = MouseRegion(
+      cursor: SystemMouseCursors.text,
+      child: selectableOutput,
+    );
 
     final List<String> inlineImageUrls = tokens
         .where((_InlineToken token) => token.isImage)
@@ -223,27 +264,123 @@ extension _StreamingMarkdownInlineMarkdownRenderer
   }
 }
 
-class _SelectionAwareInlineStack extends StatelessWidget {
-  const _SelectionAwareInlineStack({
-    required this.animatedLayer,
-    required this.selectableLayer,
-  });
+String _selectedTextForRange(
+  String text,
+  _MarkdownSelectionRange? range,
+) {
+  if (range == null || text.isEmpty) {
+    return '';
+  }
+  final int start = range.start.clamp(0, text.length);
+  final int end = range.end.clamp(start, text.length);
+  return start >= end ? '' : text.substring(start, end);
+}
 
-  final Widget animatedLayer;
-  final Widget selectableLayer;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.centerLeft,
-      children: [
-        Positioned.fill(child: selectableLayer),
-        SelectionContainer.disabled(
-          child: IgnorePointer(child: animatedLayer),
-        ),
-      ],
+String _plainTextForVisualInlineTokens(
+  List<_InlineToken> tokens, {
+  required Map<String, int> footnoteNumbers,
+}) {
+  final StringBuffer buffer = StringBuffer();
+  for (final _InlineToken token in tokens) {
+    buffer.write(
+      _plainTextForVisualInlineToken(
+        token,
+        footnoteNumbers: footnoteNumbers,
+      ),
     );
   }
+  return buffer.toString();
+}
+
+TextSpan _selectionTextSpanForInlineTokens(
+  List<_InlineToken> tokens,
+  TextStyle baseStyle, {
+  required Map<String, int> footnoteNumbers,
+}) {
+  final List<InlineSpan> spans = <InlineSpan>[];
+  for (final _InlineToken token in tokens) {
+    TextStyle style = baseStyle;
+    if (token.style.bold) {
+      style = style.copyWith(fontWeight: FontWeight.w700);
+    }
+    if (token.style.italic) {
+      style = style.copyWith(fontStyle: FontStyle.italic);
+    }
+    if (token.style.code) {
+      style = style.copyWith(fontFamily: 'monospace', fontSize: 12);
+    }
+    spans.add(
+      TextSpan(
+        text: _plainTextForVisualInlineToken(
+          token,
+          footnoteNumbers: footnoteNumbers,
+        ),
+        style: style,
+      ),
+    );
+  }
+  return TextSpan(style: baseStyle, children: spans);
+}
+
+_MarkdownSelectionRange? _sourceSelectionVisualRangeForInline(
+  BuildContext context,
+  int textLength, {
+  required int plainTextStart,
+}) {
+  final _MarkdownSourceSelectionVisualScope? visualScope =
+      _MarkdownSourceSelectionVisualScope.maybeOf(context);
+  final _MarkdownSelectionBlockVisualScope? blockScope =
+      _MarkdownSelectionBlockVisualScope.maybeOf(context);
+  final _MarkdownSourceSelectionRange? sourceRange = visualScope?.sourceRange;
+  final _MarkdownSelectionRange? plainRange = visualScope?.plainRange;
+  if (visualScope == null ||
+      blockScope == null ||
+      sourceRange == null ||
+      plainRange == null) {
+    return null;
+  }
+
+  final _MarkdownSelectionBlockRange blockRange = blockScope.blockRange;
+  if (sourceRange.end <= blockRange.sourceRange.start ||
+      sourceRange.start >= blockRange.sourceRange.end ||
+      plainRange.end <= blockRange.plainRange.start ||
+      plainRange.start >= blockRange.plainRange.end) {
+    return null;
+  }
+
+  final int absoluteTextStart = blockRange.plainRange.start + plainTextStart;
+  final int absoluteTextEnd = absoluteTextStart + textLength;
+  if (plainRange.end <= absoluteTextStart ||
+      plainRange.start >= absoluteTextEnd) {
+    return null;
+  }
+
+  final int start = (plainRange.start - absoluteTextStart).clamp(0, textLength);
+  final int end = (plainRange.end - absoluteTextStart).clamp(start, textLength);
+  if (start >= end) {
+    return null;
+  }
+  return _MarkdownSelectionRange(start: start, end: end);
+}
+
+String _plainTextForVisualInlineToken(
+  _InlineToken token, {
+  required Map<String, int> footnoteNumbers,
+}) {
+  if (token.isImage) {
+    return token.altText.isEmpty ? '[image]' : '[image: ${token.altText}]';
+  }
+  if (token.isFootnoteReference) {
+    final int? number = _footnoteNumberForId(
+      footnoteNumbers,
+      token.footnoteReferenceId!,
+    );
+    return number?.toString() ?? token.footnoteReferenceId!;
+  }
+  if (token.isLatex) {
+    return token.sourceMarkdown;
+  }
+  return token.text;
 }
 
 extension _StreamingMarkdownLinkActions on StreamingMarkdownRenderView {
