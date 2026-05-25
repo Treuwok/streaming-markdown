@@ -33,7 +33,8 @@ class WindowsClipboardHtmlFormatter {
       '',
     ].join('\r\n');
     final int startHtml = _utf8Length(placeholder);
-    final int startFragment = startHtml + _utf8Length('<html><body>$startMarker');
+    final int startFragment =
+        startHtml + _utf8Length('<html><body>$startMarker');
     final int endFragment = startFragment + _utf8Length(htmlFragment);
     final int endHtml = startHtml + _utf8Length(html);
     final String header = [

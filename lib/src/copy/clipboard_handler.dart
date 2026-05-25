@@ -20,7 +20,8 @@ class MarkdownClipboardPayload {
 
 class MarkdownClipboardHandler {
   MarkdownClipboardHandler({MarkdownClipboardWriter? writer})
-      : _writer = writer ?? (debugWriterFactory?.call() ?? createClipboardWriter());
+      : _writer =
+            writer ?? (debugWriterFactory?.call() ?? createClipboardWriter());
 
   final MarkdownClipboardWriter _writer;
 
@@ -41,7 +42,8 @@ class MarkdownClipboardHandler {
         await _writer.writePlainText(plainText);
         return;
       case SelectionStrategy.raw:
-        await _writer.writePlainText(rawMarkdown.isEmpty ? plainText : rawMarkdown);
+        await _writer
+            .writePlainText(rawMarkdown.isEmpty ? plainText : rawMarkdown);
         return;
       case SelectionStrategy.rich:
         final String? htmlText = payload.htmlText;
