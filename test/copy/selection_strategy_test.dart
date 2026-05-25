@@ -8,22 +8,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-const String _messiMarkdown = '''Hello! You are asking about the ultimate debate in football: **Messi vs. Ronaldo**! 🐐🐐
+const String _messiMarkdown =
+    '''Hello! You are asking about the ultimate debate in football: **Messi vs. Ronaldo**! 🐐🐐
 
 This is one of the biggest and most passionate debates in sports, and the answer really depends on what qualities you value most in a player. Both are absolute legends, but they excel in different areas.
 
-Here is a quick breakdown to help you think about it:👑 
+Here is a quick breakdown to help you think about it:👑
 
 # Lionel Messi
 
 * **Strengths**: Playmaking, dribbling, vision, passing, and overall creativity.
 * **Style**: Often seen as the ultimate natural playmaker and genius. He controls the game and creates chances for others, while also scoring incredible goals.''';
 
-const String _messiPlain = '''Hello! You are asking about the ultimate debate in football: Messi vs. Ronaldo! 🐐🐐
+const String _messiPlain =
+    '''Hello! You are asking about the ultimate debate in football: Messi vs. Ronaldo! 🐐🐐
 
 This is one of the biggest and most passionate debates in sports, and the answer really depends on what qualities you value most in a player. Both are absolute legends, but they excel in different areas.
 
-Here is a quick breakdown to help you think about it:👑 
+Here is a quick breakdown to help you think about it:👑
 
 Lionel Messi
 
@@ -32,7 +34,8 @@ Style: Often seen as the ultimate natural playmaker and genius. He controls the 
 
 const String _messiRaw = _messiMarkdown;
 
-const String _messiRichHtml = '<p>Hello! You are asking about the ultimate debate in football: <strong>Messi vs. Ronaldo</strong>! 🐐🐐</p>'
+const String _messiRichHtml =
+    '<p>Hello! You are asking about the ultimate debate in football: <strong>Messi vs. Ronaldo</strong>! 🐐🐐</p>'
     '<p>This is one of the biggest and most passionate debates in sports, and the answer really depends on what qualities you value most in a player. Both are absolute legends, but they excel in different areas.</p>'
     '<p>Here is a quick breakdown to help you think about it:👑</p>'
     '<h1>Lionel Messi</h1>'
@@ -106,7 +109,8 @@ void main() {
     );
   });
 
-  test('partial selection across two blocks converts only selected content', () {
+  test('partial selection across two blocks converts only selected content',
+      () {
     final MarkdownParseResult result = MarkdownSyncParser.parseMarkdown(
       '**Hello** world\n\nSecond `code` block',
       backend: MarkdownSyncParserBackend.dart,
@@ -168,7 +172,8 @@ void main() {
     );
   });
 
-  test('rich clipboard fallback silently writes plain text on failure', () async {
+  test('rich clipboard fallback silently writes plain text on failure',
+      () async {
     final _RecordingWriter writer = _RecordingWriter(throwOnRich: true);
     final MarkdownClipboardHandler handler = MarkdownClipboardHandler(
       writer: writer,
@@ -189,8 +194,7 @@ void main() {
 
   test('windows CF_HTML formatter builds valid offsets', () {
     const String fragment = '<p><strong>Hello</strong></p>';
-    final String cfHtml =
-        WindowsClipboardHtmlFormatter.buildCfHtml(fragment);
+    final String cfHtml = WindowsClipboardHtmlFormatter.buildCfHtml(fragment);
     final RegExpMatch match = RegExp(
       r'StartHTML:(\d+)\r\nEndHTML:(\d+)\r\nStartFragment:(\d+)\r\nEndFragment:(\d+)',
     ).firstMatch(cfHtml)!;
