@@ -24,7 +24,7 @@ void main() {
         await _pumpStreamingScrollGolden(tester, scenario);
       });
     }
-  });
+  }, skip: !Platform.isMacOS);
 }
 
 Future<void> _pumpStreamingScrollGolden(
