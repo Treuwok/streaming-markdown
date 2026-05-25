@@ -257,8 +257,7 @@ class _MarkdownHtmlSelectionConverter {
       }
       final String? url = token.linkUrl;
       if (url != null && url.isNotEmpty) {
-        content =
-            '<a href="${_escapeHtmlAttribute(url)}">$content</a>';
+        content = '<a href="${_escapeHtmlAttribute(url)}">$content</a>';
       }
       out.write(content);
     }

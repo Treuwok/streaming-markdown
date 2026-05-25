@@ -4,7 +4,8 @@ String _extractSelectedPlainText({
   required _MarkdownSelectionProjection projection,
   required SelectedContent? selectedContent,
 }) {
-  final String selected = (selectedContent?.plainText ?? '').replaceAll('\r', '');
+  final String selected =
+      (selectedContent?.plainText ?? '').replaceAll('\r', '');
   if (selected.isEmpty) {
     return '';
   }
