@@ -90,7 +90,8 @@ void main() {
     expect(find.text('B'), findsOneWidget);
   });
 
-  testWidgets('next block waits for previous token fade to finish', (
+  testWidgets('next block can reveal while previous token fade is still active',
+      (
     WidgetTester tester,
   ) async {
     final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
@@ -115,9 +116,6 @@ void main() {
     expect(find.text('Beta'), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 20));
-    expect(find.text('Beta'), findsNothing);
-
-    await tester.pump(const Duration(milliseconds: 80));
     expect(find.text('Beta'), findsOneWidget);
   });
 
@@ -158,10 +156,10 @@ void main() {
 
     expect(find.text('Next'), findsNothing);
 
-    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 70));
     expect(find.text('Next'), findsNothing);
 
-    await tester.pump(const Duration(milliseconds: 40));
+    await tester.pump(const Duration(milliseconds: 20));
     expect(find.text('Next'), findsOneWidget);
   });
 
@@ -169,7 +167,7 @@ void main() {
     WidgetTester tester,
   ) async {
     final ValueNotifier<List<MarkdownRenderNode>> nodes =
-      ValueNotifier<List<MarkdownRenderNode>>(<MarkdownRenderNode>[
+        ValueNotifier<List<MarkdownRenderNode>>(<MarkdownRenderNode>[
       _node('Hello', 0),
       _node('Next', 100),
     ]);

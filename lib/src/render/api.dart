@@ -144,6 +144,10 @@ typedef AnimatedMarkdownBlockContext = StreamingMarkdownBlockBuildContext;
 
 /// Controls whether animated word tokens shed their animation hosts after their
 /// reveal animation has completed.
+///
+/// Compaction only changes the settled node structure: the geometry used for
+/// layout and selection remains stable so a completed reveal does not reflow
+/// text or move an active selection.
 enum AnimatedMarkdownTokenCompaction {
   /// Keep the per-token widget spans for the lifetime of the rendered block.
   disabled,

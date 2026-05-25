@@ -192,16 +192,20 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
                           ),
                   ),
                   if (showCodeBlockCopyButton)
-                    IconButton(
-                      tooltip: 'Copy code',
-                      visualDensity: VisualDensity.compact,
-                      iconSize: 18,
-                      color: markdownTheme.codeBlockLanguageTextStyle?.color ??
-                          const Color(0xFF8B949E),
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: code));
-                      },
-                      icon: const Icon(Icons.copy_all_outlined),
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: IconButton(
+                        tooltip: 'Copy code',
+                        visualDensity: VisualDensity.compact,
+                        iconSize: 18,
+                        color:
+                            markdownTheme.codeBlockLanguageTextStyle?.color ??
+                                const Color(0xFF8B949E),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: code));
+                        },
+                        icon: const Icon(Icons.copy_all_outlined),
+                      ),
                     ),
                 ],
               ),
@@ -247,14 +251,17 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
       animatePerWord: !compacted,
     );
 
-    return RichText(
-      textAlign: TextAlign.left,
-      textDirection: TextDirection.ltr,
-      textScaler: MediaQuery.textScalerOf(context),
-      selectionRegistrar:
-          enableTextSelection ? SelectionContainer.maybeOf(context) : null,
-      selectionColor: markdownTheme.selectionColor ?? const Color(0x6658A6FF),
-      text: TextSpan(style: style, children: spans),
+    return MouseRegion(
+      cursor: SystemMouseCursors.text,
+      child: RichText(
+        textAlign: TextAlign.left,
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+        selectionRegistrar:
+            enableTextSelection ? SelectionContainer.maybeOf(context) : null,
+        selectionColor: markdownTheme.selectionColor ?? const Color(0x6658A6FF),
+        text: TextSpan(style: style, children: spans),
+      ),
     );
   }
 }

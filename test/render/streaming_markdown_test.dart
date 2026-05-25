@@ -344,6 +344,61 @@ Setext title
     expect(clipboardText, 'final answer = 42;');
   });
 
+  testWidgets(
+      'markdown text uses text cursor and copy button uses click cursor',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StreamingMarkdownRenderView(
+            nodes: <MarkdownRenderNode>[
+              _renderNode('Cursor target text.'),
+              _renderNode(
+                '```dart\nfinal answer = 42;\n```',
+                type: 'fenced_code_block',
+                startByte: 21,
+                startRow: 2,
+              ),
+            ],
+            padding: EdgeInsets.zero,
+            enableTextSelection: true,
+            showCodeBlockCopyButton: true,
+            tokenArrivalDelay: Duration.zero,
+            tokenFadeInDuration: Duration.zero,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.ancestor(
+        of: find.byWidgetPredicate(
+          (Widget widget) =>
+              widget is RichText &&
+              widget.text.toPlainText().contains('Cursor target text.'),
+        ),
+        matching: find.byWidgetPredicate(
+          (Widget widget) =>
+              widget is MouseRegion && widget.cursor == SystemMouseCursors.text,
+        ),
+      ),
+      findsOneWidget,
+    );
+
+    expect(
+      find.ancestor(
+        of: find.byTooltip('Copy code'),
+        matching: find.byWidgetPredicate(
+          (Widget widget) =>
+              widget is MouseRegion &&
+              widget.cursor == SystemMouseCursors.click,
+        ),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('rendered links are tappable with text selection enabled', (
     WidgetTester tester,
   ) async {
@@ -1258,6 +1313,326 @@ Setext title
     await tester.pump();
 
     expect(clipboardText, 'block begins.\n\nSecond block');
+  });
+
+  testWidgets('selection drag near viewport edge auto-scrolls ancestor',
+      (WidgetTester tester) async {
+    final ScrollController scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+
+    const String firstBlock = 'Auto scroll selection anchor.';
+    const String secondBlock = 'Auto scroll selection can continue below.';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 120,
+            child: ListView(
+              controller: scrollController,
+              children: <Widget>[
+                StreamingMarkdownRenderView(
+                  nodes: <MarkdownRenderNode>[
+                    _renderNode(firstBlock, startByte: 0),
+                    _renderNode(
+                      secondBlock,
+                      startByte: firstBlock.length + 2,
+                      startRow: 2,
+                    ),
+                  ],
+                  padding: EdgeInsets.zero,
+                  enableTextSelection: true,
+                  selectionStrategy: SelectionStrategy.raw,
+                  tokenArrivalDelay: Duration.zero,
+                  tokenFadeInDuration: Duration.zero,
+                ),
+                const SizedBox(height: 900),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final RenderParagraph paragraph =
+        _renderParagraphContaining(tester, firstBlock);
+    final Offset start = _textOffsetToHitPosition(paragraph, 0);
+    final TestGesture gesture = await tester.startGesture(
+      start,
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+
+    await gesture.moveTo(Offset(start.dx, 116));
+    for (int i = 0; i < 20; i += 1) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final double bottomEdgeOffset = scrollController.offset;
+    expect(bottomEdgeOffset, greaterThan(0));
+
+    await gesture.moveTo(Offset(start.dx, 4));
+    for (int i = 0; i < 20; i += 1) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(scrollController.offset, lessThan(bottomEdgeOffset));
+
+    await gesture.up();
+    final double releasedOffset = scrollController.offset;
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(scrollController.offset, releasedOffset);
+  });
+
+  testWidgets('auto-scroll selection keeps the upper anchor stable',
+      (WidgetTester tester) async {
+    String? clipboardText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        switch (methodCall.method) {
+          case 'Clipboard.setData':
+            final Map<dynamic, dynamic> data =
+                methodCall.arguments! as Map<dynamic, dynamic>;
+            clipboardText = data['text'] as String?;
+            return null;
+          case 'Clipboard.getData':
+            return <String, dynamic>{'text': clipboardText};
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final ScrollController scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+
+    const String firstBlock = 'Anchor starts here.';
+    final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+      _renderNode(firstBlock, startByte: 0),
+      for (int i = 0; i < 18; i += 1)
+        _renderNode(
+          'Auto-scroll block $i keeps extending the selected range.',
+          startByte: firstBlock.length + 2 + i * 60,
+          startRow: 2 + i * 2,
+        ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 120,
+            child: ListView(
+              controller: scrollController,
+              children: <Widget>[
+                StreamingMarkdownRenderView(
+                  nodes: nodes,
+                  padding: EdgeInsets.zero,
+                  enableTextSelection: true,
+                  selectionStrategy: SelectionStrategy.raw,
+                  tokenArrivalDelay: Duration.zero,
+                  tokenFadeInDuration: Duration.zero,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final RenderParagraph paragraph =
+        _renderParagraphContaining(tester, firstBlock);
+    final TestGesture gesture = await tester.startGesture(
+      _textOffsetToHitPosition(paragraph, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+
+    await gesture.moveTo(const Offset(24, 116));
+    for (int i = 0; i < 32; i += 1) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(scrollController.offset, greaterThan(0));
+    await gesture.up();
+    await tester.pump();
+
+    final BuildContext context =
+        tester.binding.focusManager.primaryFocus!.context!;
+    Actions.invoke(context, CopySelectionTextIntent.copy);
+    await tester.pump();
+
+    expect(clipboardText, startsWith(firstBlock));
+  });
+
+  testWidgets('drag selection can continue below a markdown table',
+      (WidgetTester tester) async {
+    String? clipboardText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        switch (methodCall.method) {
+          case 'Clipboard.setData':
+            final Map<dynamic, dynamic> data =
+                methodCall.arguments! as Map<dynamic, dynamic>;
+            clipboardText = data['text'] as String?;
+            return null;
+          case 'Clipboard.getData':
+            return <String, dynamic>{'text': clipboardText};
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    const String intro = 'Intro before table.';
+    const String rawTable = '| Name | Status |\n'
+        '| --- | --- |\n'
+        '| Alpha | Ready |';
+    const String after = 'After table target continues.';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 420,
+            child: StreamingMarkdownRenderView(
+              nodes: <MarkdownRenderNode>[
+                _renderNode(intro, startByte: 0),
+                _renderNode(
+                  rawTable,
+                  type: 'pipe_table',
+                  startByte: intro.length + 2,
+                  startRow: 2,
+                  endRow: 4,
+                ),
+                _renderNode(
+                  after,
+                  startByte: intro.length + rawTable.length + 4,
+                  startRow: 6,
+                ),
+              ],
+              padding: EdgeInsets.zero,
+              enableTextSelection: true,
+              selectionStrategy: SelectionStrategy.raw,
+              tokenArrivalDelay: Duration.zero,
+              tokenFadeInDuration: Duration.zero,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final RenderParagraph introParagraph =
+        _renderParagraphContaining(tester, intro);
+    final RenderParagraph tableParagraph =
+        _renderParagraphContaining(tester, 'Ready');
+    final RenderParagraph afterParagraph =
+        _renderParagraphContaining(tester, after);
+    final TestGesture gesture = await tester.startGesture(
+      _textOffsetToHitPosition(introParagraph, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture
+        .moveTo(_textOffsetToHitPosition(tableParagraph, 5, end: true));
+    await tester.pump();
+    await gesture.moveTo(
+      _textOffsetToHitPosition(afterParagraph, after.length, end: true),
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    final BuildContext context =
+        tester.binding.focusManager.primaryFocus!.context!;
+    Actions.invoke(context, CopySelectionTextIntent.copy);
+    await tester.pump();
+
+    expect(clipboardText, contains(intro));
+    expect(clipboardText, contains('| Name | Status |'));
+    expect(clipboardText, contains(after));
+  });
+
+  testWidgets('table selection drag near horizontal edge auto-scrolls table',
+      (WidgetTester tester) async {
+    await tester.binding.setSurfaceSize(const Size(260, 220));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    const String rawTable = '| H0 | H1 | H2 | H3 | H4 | H5 | H6 |\n'
+        '| --- | --- | --- | --- | --- | --- | --- |\n'
+        '| A0 wide | A1 wide | A2 wide | A3 wide | A4 wide | A5 wide | A6 wide |';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StreamingMarkdownRenderView(
+            nodes: <MarkdownRenderNode>[
+              _renderNode(
+                rawTable,
+                type: 'pipe_table',
+                startByte: 0,
+                startRow: 0,
+                endRow: 2,
+              ),
+            ],
+            padding: EdgeInsets.zero,
+            enableTextSelection: true,
+            selectionStrategy: SelectionStrategy.raw,
+            tokenArrivalDelay: Duration.zero,
+            tokenFadeInDuration: Duration.zero,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    ScrollPosition horizontalPosition() {
+      for (final ScrollableState state
+          in tester.stateList<ScrollableState>(find.byType(Scrollable))) {
+        if (axisDirectionToAxis(state.position.axisDirection) ==
+            Axis.horizontal) {
+          return state.position;
+        }
+      }
+      throw StateError('No horizontal scroll position found.');
+    }
+
+    final Rect tableFrame = tester
+        .getRect(find.byKey(const ValueKey<String>('markdown_table_frame')));
+    final RenderParagraph startParagraph =
+        _renderParagraphContaining(tester, 'A0 wide');
+    final TestGesture gesture = await tester.startGesture(
+      _textOffsetToHitPosition(startParagraph, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+
+    await gesture.moveTo(Offset(tableFrame.right - 2, tableFrame.center.dy));
+    for (int i = 0; i < 20; i += 1) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final double rightEdgeOffset = horizontalPosition().pixels;
+    expect(rightEdgeOffset, greaterThan(0));
+
+    await gesture.moveTo(Offset(tableFrame.left + 2, tableFrame.center.dy));
+    for (int i = 0; i < 20; i += 1) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(horizontalPosition().pixels, lessThan(rightEdgeOffset));
+    await gesture.up();
   });
 
   testWidgets('stream append does not interrupt an active mouse selection drag',

@@ -221,7 +221,7 @@ extension _StreamingMarkdownInlineMarkdownRenderer
       textScaler: textScaler,
       text: TextSpan(style: resolvedStyle, children: spans),
     );
-    final Widget output = !enableTextSelection
+    final Widget selectableOutput = !enableTextSelection
         ? animatedRichText
         : _SelectableInlineTextProxy(
             plainText: selectableText,
@@ -247,6 +247,10 @@ extension _StreamingMarkdownInlineMarkdownRenderer
               ),
             ),
           );
+    final Widget output = MouseRegion(
+      cursor: SystemMouseCursors.text,
+      child: selectableOutput,
+    );
 
     final List<String> inlineImageUrls = tokens
         .where((_InlineToken token) => token.isImage)

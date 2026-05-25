@@ -1,12 +1,12 @@
 ---
 title: Roadmap
-description: Planned 0.3.x work for docs, convenience APIs, copy behavior, and LaTeX.
+description: Completed 0.3.x work and the next performance and request-driven priorities.
 ---
 
 # Roadmap
 
-The current `0.3.x` line focuses on API clarity, contributor ergonomics,
-documentation, and usability features for app developers.
+The `0.3.x` line established the public API, documentation, web support,
+animation pipeline, and stable selection behavior needed by streaming apps.
 
 ## 0.3.0
 
@@ -57,11 +57,28 @@ Complete:
 - Parser benchmark publishing guidance.
 - iOS and macOS podspec metadata cleanup.
 
-## Planned
+## 0.3.5
 
-- `0.3.5`: richer copy modes such as plaintext, Markdown, document, image copy,
-  and better drag selection across complex content.
-- `0.4.0`: promote larger rendering APIs after the package has stable sizing,
-  selection, and copy behavior.
+Complete:
+
+- Flutter web platform metadata hotfix for the published WASM-backed build.
+
+## 0.3.6
+
+Complete:
+
+- Render-backed selection with source-anchored ranges instead of a visual
+  overlay-derived selection range.
+- Partial table-cell selection and dragging through tables into later blocks.
+- Vertical viewport and horizontal table edge auto-scroll while selecting.
+- Token compaction after animation settlement without layout jolts.
+- `Gravity` animation example with `Fade` restored as the default demo effect.
+
+## Next Priorities
+
+- Optimize parser and renderer performance, especially stable-content render
+  cost, token compaction, scrolling, and measurable benchmark coverage.
+- Develop new functionality in response to real application requirements and
+  user feature requests, rather than committing early to speculative APIs.
 
 Roadmap items can change based on package users, issue reports, and API risk.

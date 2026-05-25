@@ -45,7 +45,7 @@ class MarkdownCasesDemoPage extends StatefulWidget {
 }
 
 class _MarkdownCasesDemoPageState extends State<MarkdownCasesDemoPage> {
-  static const int _defaultTokenAnimationIndex = 4;
+  static const int _defaultTokenAnimationIndex = 0;
   static const int _streamChunkLength = 28;
   static const Duration _streamChunkDelay = Duration(milliseconds: 110);
 
@@ -1177,6 +1177,24 @@ final List<_TokenAnimationPreset> _tokenAnimationPresets =
                   alignment: Alignment.bottomLeft,
                   child: token.child,
                 ),
+              ),
+            ),
+          );
+        },
+      ),
+      _TokenAnimationPreset(
+        name: 'Gravity',
+        builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
+          final double fall = Curves.bounceOut.transform(token.value);
+          final double fade = Curves.easeOutCubic.transform(token.value);
+          return Opacity(
+            opacity: fade,
+            child: Transform.translate(
+              offset: Offset(0, -64 * (1 - fall)),
+              child: Transform.scale(
+                scale: 0.96 + (0.04 * fall),
+                alignment: Alignment.bottomCenter,
+                child: token.child,
               ),
             ),
           );

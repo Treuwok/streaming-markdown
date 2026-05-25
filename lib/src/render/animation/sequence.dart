@@ -14,7 +14,6 @@ class _SequencedBlockList extends StatefulWidget {
     required this.padding,
     required this.blockSpacing,
     required this.tokenArrivalDelay,
-    required this.tokenFadeDuration,
     required this.paused,
     required this.blockIdentityBuilder,
     required this.blockBuilder,
@@ -27,7 +26,6 @@ class _SequencedBlockList extends StatefulWidget {
   final EdgeInsetsGeometry padding;
   final double blockSpacing;
   final Duration tokenArrivalDelay;
-  final Duration tokenFadeDuration;
   final bool paused;
   final VoidCallback? onWait;
   final VoidCallback? onSequenceSettled;

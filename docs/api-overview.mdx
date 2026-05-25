@@ -97,10 +97,12 @@ Important renderer options include:
 - `tokenAnimationDurationFactor`
 - `tokenAnimationCurve`
 - `tokenAnimationBuilder`
+- `tokenCompaction`
 - `onTokenDelay`
 - `onTokenAnimationEnd`
 - `showCodeBlockCopyButton`
 - `enableSelection`
+- `selectionStrategy`
 - `theme`
 - `blockBuilder`
 - `imageBuilder`
@@ -141,6 +143,19 @@ AnimatedStreamingMarkdown(
 ```
 
 Return `null` to use the default widget.
+
+## Selection And Token Compaction
+
+With `enableSelection: true`, the renderer maps pointer gestures to absolute
+Markdown source ranges through selectable render proxies. The visual highlight
+is projected from that stable range, so appends and scroll motion do not move
+the chosen endpoints. Users can select partial text within table cells, drag
+through a table into later blocks, and continue a drag at vertical or
+horizontal scroll edges.
+
+`tokenCompaction` defaults to `AnimatedMarkdownTokenCompaction.automatic`.
+After animated word tokens settle, it merges their animation hosts into lighter
+static spans while retaining the same geometry for layout and selection.
 
 ## API Reference
 

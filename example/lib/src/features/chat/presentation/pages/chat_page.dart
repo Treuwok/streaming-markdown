@@ -25,7 +25,7 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
-  static const int _defaultTokenAnimationPresetIndex = 4;
+  static const int _defaultTokenAnimationPresetIndex = 0;
 
   final TextEditingController _messageController = TextEditingController();
   final TextEditingController _modelController = TextEditingController();
@@ -327,6 +327,24 @@ final List<_TokenAnimationPreset> _tokenAnimationPresets =
                   alignment: Alignment.bottomLeft,
                   child: token.child,
                 ),
+              ),
+            ),
+          );
+        },
+      ),
+      _TokenAnimationPreset(
+        name: 'Gravity',
+        builder: (BuildContext context, StreamingMarkdownAnimatedToken token) {
+          final double fall = Curves.bounceOut.transform(token.value);
+          final double fade = Curves.easeOutCubic.transform(token.value);
+          return Opacity(
+            opacity: fade,
+            child: Transform.translate(
+              offset: Offset(0, -64 * (1 - fall)),
+              child: Transform.scale(
+                scale: 0.96 + (0.04 * fall),
+                alignment: Alignment.bottomCenter,
+                child: token.child,
               ),
             ),
           );

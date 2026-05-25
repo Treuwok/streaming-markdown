@@ -87,6 +87,12 @@ part 'html/inline.dart';
 /// markdown [blocks] with stable block layout, token-level animation, optional
 /// selection, and markdown-aware copy behavior.
 ///
+/// When selection is enabled, selectable text is backed by render proxies that
+/// resolve gestures to stable source ranges. Highlights are projected from
+/// those ranges, so selection remains anchored while streams append or an
+/// ancestor scrolls; table cells remain partially selectable and wide tables
+/// can auto-scroll during a drag.
+///
 /// Use [StreamingMarkdownParseWorker.replace] or
 /// [StreamingMarkdownParseWorker.append] to produce the [MarkdownRenderNode]
 /// blocks passed here.
@@ -312,7 +318,8 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// Pauses token and block reveal scheduling without changing parser input.
   final bool tokenAnimationPaused;
 
-  /// Merges settled animated word tokens back into static text spans.
+  /// Merges settled animated word tokens back into static text spans without
+  /// changing their measured geometry or interrupting reveal animations.
   final AnimatedMarkdownTokenCompaction tokenCompaction;
 
   /// Paints token debug backgrounds to inspect token boundaries.
@@ -321,7 +328,12 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// Shows a copy button in fenced and indented code block headers.
   final bool showCodeBlockCopyButton;
 
-  /// Enables selectable text and markdown-aware copy behavior.
+  /// Enables render-backed selectable text and markdown-aware copy behavior.
+  ///
+  /// Selection stores stable source offsets rather than inferring a range from
+  /// overlaid visual text, preserving anchors during scrolling and streaming.
+  /// Dragging near a scroll edge automatically extends selection through the
+  /// scrollable viewport, including horizontal Markdown tables.
   final bool enableTextSelection;
 
   /// Controls whether copied selections become plain text, raw markdown,
@@ -613,7 +625,6 @@ class StreamingMarkdownRenderView extends StatelessWidget {
       padding: padding,
       blockSpacing: markdownTheme.blockSpacing,
       tokenArrivalDelay: tokenArrivalDelay,
-      tokenFadeDuration: _resolvedTokenFadeInDuration(),
       paused: tokenAnimationPaused,
       onWait: onTokenArrivalWait,
       onSequenceSettled: onSequenceSettled,

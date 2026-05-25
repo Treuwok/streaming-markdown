@@ -356,8 +356,14 @@ class _RenderSelectableInlineTextProxy extends RenderProxyBox
     if (_selectionRegistry == value) {
       return;
     }
+    if (attached) {
+      _selectionRegistry?.unregisterSelectable(this);
+    }
     _selectionRegistry?.clear(this, notify: false);
     _selectionRegistry = value;
+    if (attached) {
+      _selectionRegistry?.registerSelectable(this);
+    }
     _updateSelectionRegistry();
   }
 
@@ -374,11 +380,13 @@ class _RenderSelectableInlineTextProxy extends RenderProxyBox
   @override
   void attach(PipelineOwner owner) {
     super.attach(owner);
+    _selectionRegistry?.registerSelectable(this);
     _updateSelectionRegistrarSubscription();
   }
 
   @override
   void detach() {
+    _selectionRegistry?.unregisterSelectable(this);
     _selectionRegistry?.clear(this, notify: false);
     _removeSelectionRegistrarSubscription();
     super.detach();
@@ -386,6 +394,7 @@ class _RenderSelectableInlineTextProxy extends RenderProxyBox
 
   @override
   void dispose() {
+    _selectionRegistry?.unregisterSelectable(this);
     _selectionRegistry?.clear(this, notify: false);
     _removeSelectionRegistrarSubscription();
     _listeners.clear();
@@ -613,6 +622,17 @@ class _RenderSelectableInlineTextProxy extends RenderProxyBox
       case SelectionEventType.endEdgeUpdate:
         final SelectionEdgeUpdateEvent edgeEvent =
             event as SelectionEdgeUpdateEvent;
+        final int offset = _positionForLocalOffset(
+          globalToLocal(edgeEvent.globalPosition),
+        );
+        _selectionRegistry?.reportDragUpdate(
+          _MarkdownInlineSelectionDragUpdate(
+            globalPosition: edgeEvent.globalPosition,
+            displayOffset: absolutePlainTextStart + offset,
+            compactOffset: compactPlainTextStart + offset,
+            isEnd: event.type == SelectionEventType.endEdgeUpdate,
+          ),
+        );
         result = _updateSelectionEdge(
           edgeEvent.globalPosition,
           isEnd: event.type == SelectionEventType.endEdgeUpdate,

@@ -117,39 +117,48 @@ extension _StreamingMarkdownTableAndMetadataRenderer
         width: frameWidth,
         child: DecoratedBox(
           decoration: BoxDecoration(color: bodyBackground),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Builder(
-              builder: (BuildContext tableContext) {
-                final List<Widget> rowTables = _buildTableRows(
-                  tableContext,
-                  table: table,
-                  theme: theme,
-                  colorScheme: colorScheme,
-                  headerBackground: headerBackground,
-                  bodyBackground: bodyBackground,
-                  alternateRowBackground: alternateRowBackground,
-                  borderColor: borderColor,
-                  columnWidths: columnWidths,
-                  tableWidth: tableWidth,
-                  tokenScheduleOrigin: tokenScheduleOrigin,
-                  resolvedTokenStep: resolvedTokenStep,
-                  linkReferences: linkReferences,
-                  footnoteNumbers: footnoteNumbers,
-                  plainTextStarts: plainTextStarts,
-                );
-                return Align(
-                  alignment: Alignment.centerLeft,
-                  child: SizedBox(
-                    width: tableWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: rowTables,
-                    ),
-                  ),
-                );
-              },
-            ),
+          child: _MarkdownSelectionAutoScrollRegionHost(
+            axis: Axis.horizontal,
+            builder: (
+              BuildContext context,
+              ScrollController scrollController,
+            ) {
+              return SingleChildScrollView(
+                controller: scrollController,
+                scrollDirection: Axis.horizontal,
+                child: Builder(
+                  builder: (BuildContext tableContext) {
+                    final List<Widget> rowTables = _buildTableRows(
+                      tableContext,
+                      table: table,
+                      theme: theme,
+                      colorScheme: colorScheme,
+                      headerBackground: headerBackground,
+                      bodyBackground: bodyBackground,
+                      alternateRowBackground: alternateRowBackground,
+                      borderColor: borderColor,
+                      columnWidths: columnWidths,
+                      tableWidth: tableWidth,
+                      tokenScheduleOrigin: tokenScheduleOrigin,
+                      resolvedTokenStep: resolvedTokenStep,
+                      linkReferences: linkReferences,
+                      footnoteNumbers: footnoteNumbers,
+                      plainTextStarts: plainTextStarts,
+                    );
+                    return Align(
+                      alignment: Alignment.centerLeft,
+                      child: SizedBox(
+                        width: tableWidth,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: rowTables,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
           ),
         ),
       ),
