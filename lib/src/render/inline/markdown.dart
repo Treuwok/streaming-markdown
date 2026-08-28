@@ -26,6 +26,7 @@ extension _StreamingMarkdownInlineMarkdownRenderer
       normalized,
       references: linkReferences,
       allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
+      withholdIncompleteDestinations: withholdIncompleteDestinations,
     );
     if (tokens.isEmpty) {
       return Text(normalized, style: resolvedStyle);

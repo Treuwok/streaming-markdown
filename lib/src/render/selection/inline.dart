@@ -12,6 +12,7 @@ extension _StreamingMarkdownSelectionInlineBuilder
       text.replaceAll('\r', ''),
       references: linkReferences,
       allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
+      withholdIncompleteDestinations: withholdIncompleteDestinations,
     );
     final List<_MarkdownSelectionPiece> pieces = <_MarkdownSelectionPiece>[];
     for (final _InlineToken token in tokens) {

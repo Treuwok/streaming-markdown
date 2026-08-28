@@ -105,6 +105,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     super.padding = EdgeInsets.zero,
     bool asSliver = false,
     bool allowIncompleteInlineSyntax = false,
+    bool withholdIncompleteDestinations = false,
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
@@ -131,6 +132,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
           emptyPlaceholder: placeholder,
           sliver: asSliver,
           allowUnclosedInlineDelimiters: allowIncompleteInlineSyntax,
+          withholdIncompleteDestinations: withholdIncompleteDestinations,
           tokenArrivalDelay: tokenStaggerDelay,
           onTokenArrivalWait: onTokenDelay,
           onTokenFadeInEnd: onTokenAnimationEnd,
@@ -168,6 +170,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     EdgeInsetsGeometry padding = EdgeInsets.zero,
     bool asSliver = false,
     bool allowIncompleteInlineSyntax = false,
+    bool withholdIncompleteDestinations = false,
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
@@ -202,6 +205,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
       padding: padding,
       asSliver: asSliver,
       allowIncompleteInlineSyntax: allowIncompleteInlineSyntax,
+      withholdIncompleteDestinations: withholdIncompleteDestinations,
       tokenStaggerDelay: tokenStaggerDelay,
       onTokenDelay: onTokenDelay,
       onTokenAnimationEnd: onTokenAnimationEnd,
@@ -251,6 +255,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     this.padding = const EdgeInsets.all(12),
     this.sliver = false,
     this.allowUnclosedInlineDelimiters = false,
+    this.withholdIncompleteDestinations = false,
     this.tokenArrivalDelay = Duration.zero,
     this.onTokenArrivalWait,
     this.onTokenFadeInEnd,
@@ -289,6 +294,24 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// Allows unfinished inline emphasis/link delimiters to render during
   /// streaming instead of waiting for the closing delimiter.
   final bool allowUnclosedInlineDelimiters;
+
+  /// Holds back inline text whose link destination has not arrived yet.
+  ///
+  /// Off by default: the historical behaviour is to paint an unresolved
+  /// `[label](https://…` or `<https://…` as literal source, which puts the
+  /// destination on screen for as long as the rest of it is in flight. That is
+  /// harmless for a document already on disk and wrong for a stream, where
+  /// every chunk boundary can land inside a URL.
+  ///
+  /// This is deliberately NOT the same question as
+  /// [allowUnclosedInlineDelimiters], which governs emphasis — text that is
+  /// visible either way. A destination is text the author never intended to
+  /// show at all, so "render it early" and "render it late" are not two styles
+  /// of the same choice.
+  ///
+  /// When on, tokenising stops at the unresolved construct and resumes from
+  /// the same source on the next frame; nothing before it is affected.
+  final bool withholdIncompleteDestinations;
 
   /// Delay between adjacent token reveal starts.
   final Duration tokenArrivalDelay;

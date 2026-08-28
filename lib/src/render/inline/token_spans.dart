@@ -243,6 +243,7 @@ extension _StreamingMarkdownInlineTokenSpans on StreamingMarkdownRenderView {
       text.replaceAll('\r', ''),
       references: linkReferences,
       allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
+      withholdIncompleteDestinations: withholdIncompleteDestinations,
     );
     if (tokens.isEmpty) {
       return _inlineWordCount(text);

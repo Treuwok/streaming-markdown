@@ -7,6 +7,7 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
     Map<String, String> references = const <String, String>{},
     int depth = 0,
     bool allowUnclosedDelimiters = false,
+    bool withholdIncompleteDestinations = false,
   }) {
     if (text.isEmpty) {
       return <_InlineToken>[];
@@ -65,11 +66,22 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
           continue;
         }
 
-        final _InlineLinkMatch? link = _matchInlineLinkAt(
+        final _InlineLinkScan scan = _scanInlineLinkAt(
           text,
           i,
           references: references,
         );
+        if (scan.kind == _InlineLinkScanKind.incompleteDestination &&
+            withholdIncompleteDestinations) {
+          // Stop here rather than falling through to the plain-text path. That
+          // fall-through is what paints a destination still in flight: the
+          // source is written out verbatim, URL included. Everything already
+          // tokenised stays; only the unresolved tail is held back, and the
+          // next chunk re-tokenises from the same source.
+          flushPlain();
+          return tokens;
+        }
+        final _InlineLinkMatch? link = scan.match;
         if (link != null) {
           flushPlain();
           final List<_InlineToken> labelTokens = _parseInlineTokens(
@@ -78,6 +90,7 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
             references: references,
             depth: depth + 1,
             allowUnclosedDelimiters: allowUnclosedDelimiters,
+            withholdIncompleteDestinations: withholdIncompleteDestinations,
           );
           if (labelTokens.isEmpty) {
             tokens.add(
@@ -107,6 +120,14 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
 
       if (text.startsWith('<http://', i) || text.startsWith('<https://', i)) {
         final int end = text.indexOf('>', i + 1);
+        if (end == -1 &&
+            withholdIncompleteDestinations &&
+            !text.contains('\n', i)) {
+          // `<https://…` with no closing `>` yet — same shape as above, and the
+          // same leak: the plain-text path would write the URL out.
+          flushPlain();
+          return tokens;
+        }
         if (end != -1) {
           flushPlain();
           final String url = text.substring(i + 1, end);

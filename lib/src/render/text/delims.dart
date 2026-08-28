@@ -132,43 +132,64 @@ extension _StreamingMarkdownDelimiterParsing on StreamingMarkdownRenderView {
     return image;
   }
 
-  _InlineLinkMatch? _matchInlineLinkAt(
+  /// Scan for an inline link, reporting WHICH of the two "no match" cases
+  /// applies. See [_InlineLinkScanKind] for why that distinction has to leave
+  /// this function rather than being rediscovered outside it.
+  ///
+  /// "Incomplete" means: the syntax so far can still become a link, and the
+  /// part that has not arrived is the part that would be HIDDEN once it does.
+  /// A destination is only ever a candidate while the source keeps growing, so
+  /// every incomplete arm below is conditioned on being at the end of what has
+  /// been received.
+  _InlineLinkScan _scanInlineLinkAt(
     String text,
     int start, {
     required Map<String, String> references,
   }) {
     if (!text.startsWith('[', start)) {
-      return null;
+      return const _InlineLinkScan.notALink();
     }
 
     final int closeBracket = text.indexOf(']', start + 1);
     if (closeBracket == -1) {
-      return null;
+      // An unclosed label is only a pending link while more source may follow;
+      // a newline ends the inline context and settles it as literal text.
+      return text.contains('\n', start)
+          ? const _InlineLinkScan.notALink()
+          : const _InlineLinkScan.incompleteDestination();
     }
 
     final String label = text.substring(start + 1, closeBracket);
     if (label.isEmpty) {
-      return null;
+      return const _InlineLinkScan.notALink();
     }
 
     if (closeBracket + 1 < text.length && text[closeBracket + 1] == '(') {
       final int closeParen = text.indexOf(')', closeBracket + 2);
       if (closeParen == -1) {
-        return null;
+        // `[label](https://…` with no closing paren yet — the destination is
+        // mid-flight. This is the leak: painting the source here shows the URL.
+        return text.contains('\n', closeBracket)
+            ? const _InlineLinkScan.notALink()
+            : const _InlineLinkScan.incompleteDestination();
       }
 
       final String raw = text.substring(closeBracket + 2, closeParen).trim();
       if (raw.isEmpty) {
-        return null;
+        return const _InlineLinkScan.notALink();
       }
       final String url = _stripEnclosingAngles(raw.split(RegExp(r'\s+')).first);
-      return _InlineLinkMatch(label: label, url: url, end: closeParen + 1);
+      return _InlineLinkScan.matched(
+        _InlineLinkMatch(label: label, url: url, end: closeParen + 1),
+      );
     }
 
     if (closeBracket + 1 < text.length && text[closeBracket + 1] == '[') {
       final int closeRef = text.indexOf(']', closeBracket + 2);
       if (closeRef == -1) {
-        return null;
+        return text.contains('\n', closeBracket)
+            ? const _InlineLinkScan.notALink()
+            : const _InlineLinkScan.incompleteDestination();
       }
       final String rawKey = text.substring(closeBracket + 2, closeRef).trim();
       final String key = _normalizeReferenceKey(
@@ -176,20 +197,28 @@ extension _StreamingMarkdownDelimiterParsing on StreamingMarkdownRenderView {
       );
       final String? url = references[key];
       if (url == null) {
-        return null;
+        // The definition may still arrive later in the stream. Until it does,
+        // the label is a reference whose destination is unknown — not text.
+        return const _InlineLinkScan.incompleteDestination();
       }
-      return _InlineLinkMatch(label: label, url: url, end: closeRef + 1);
+      return _InlineLinkScan.matched(
+        _InlineLinkMatch(label: label, url: url, end: closeRef + 1),
+      );
     }
 
     final String? shortcutUrl = references[_normalizeReferenceKey(label)];
     if (shortcutUrl != null) {
-      return _InlineLinkMatch(
-        label: label,
-        url: shortcutUrl,
-        end: closeBracket + 1,
+      return _InlineLinkScan.matched(
+        _InlineLinkMatch(
+          label: label,
+          url: shortcutUrl,
+          end: closeBracket + 1,
+        ),
       );
     }
 
-    return null;
+    // `[label]` with no definition anywhere. Shortcut references resolve late
+    // in a stream, so this is a destination that has not arrived, not prose.
+    return const _InlineLinkScan.incompleteDestination();
   }
 }
