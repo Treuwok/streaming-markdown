@@ -23,6 +23,18 @@ MarkdownRenderNode _htmlBlock(String source) => MarkdownRenderNode(
       content: source,
     );
 
+MarkdownRenderNode _paragraphNode(String source, int start) =>
+    MarkdownRenderNode(
+      type: 'paragraph',
+      depth: 0,
+      startByte: start,
+      endByte: start + source.length,
+      startRow: 0,
+      endRow: 0,
+      raw: source,
+      content: source,
+    );
+
 String _painted(WidgetTester tester) {
   final buffer = StringBuffer();
   for (final Element element in find.byType(RichText).evaluate()) {
@@ -72,17 +84,29 @@ void main() {
     expect(painted, isNot(contains('</div>')));
   });
 
-  test('the text the tags wrapped can be selected and copied', () {
-    // Painted but not selectable is its own bug: the block used to contribute
-    // an empty range to the selection projection, which was right only while
-    // it painted nothing. Now that the prose is on screen, a selection that
-    // spans it must carry it.
+  test('the text the tags wrapped survives a selection across blocks', () {
+    // Painted but not copyable is its own bug: the block used to contribute an
+    // empty range to the selection projection, correct only while it painted
+    // nothing.
+    //
+    // It has to be a MULTI-block selection. Selecting this block alone cannot
+    // see the difference — the helper echoes the requested plain text when no
+    // segment claims it, so the broken and the fixed version return the same
+    // string. That version of this test passed with the fix deleted.
+    final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
+      _paragraphNode('Before', 0),
+      _htmlBlock(_source),
+      _paragraphNode('After', 100),
+    ];
+
     final String copied =
         StreamingMarkdownRenderView.debugMarkdownForSelectedPlainText(
-      nodes: <MarkdownRenderNode>[_htmlBlock(_source)],
-      selectedPlainText: 'Important answer',
+      nodes: nodes,
+      selectedPlainText: 'Before\nImportant answer\nAfter',
       suppressRawHtml: true,
     );
-    expect(copied, contains('Important answer'));
+
+    expect(copied, contains('Important answer'),
+        reason: 'what is on screen has to be copyable with its neighbours');
   });
 }
