@@ -38,7 +38,7 @@ void main() {
     };
 
     cases.forEach((String name, String source) {
-      test('$name', () {
+      test(name, () {
         expect(_hidden(source), source,
             reason: 'every character of it is raw data');
       });

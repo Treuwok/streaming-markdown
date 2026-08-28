@@ -186,6 +186,7 @@ class _InlineToken {
     required this.text,
     required this.style,
     required this.sourceMarkdown,
+    required this.visibleSourceStart,
     this.linkUrl,
   })  : altText = '',
         imageUrl = null,
@@ -197,6 +198,7 @@ class _InlineToken {
     required this.altText,
     required this.imageUrl,
     required this.sourceMarkdown,
+    required this.visibleSourceStart,
   })  : text = '',
         style = const _InlineStyle(),
         linkUrl = null,
@@ -207,6 +209,7 @@ class _InlineToken {
   const _InlineToken.footnote({
     required this.footnoteReferenceId,
     required this.sourceMarkdown,
+    required this.visibleSourceStart,
   })  : text = '',
         style = const _InlineStyle(),
         linkUrl = null,
@@ -219,6 +222,7 @@ class _InlineToken {
     required this.latexExpression,
     required this.latexDisplay,
     required this.sourceMarkdown,
+    required this.visibleSourceStart,
   })  : text = '',
         style = const _InlineStyle(),
         linkUrl = null,
@@ -236,6 +240,27 @@ class _InlineToken {
   final bool latexDisplay;
   final String sourceMarkdown;
 
+  /// Where this token's visible [text] begins in the source handed to `scan`.
+  ///
+  /// Absolute, in the same code-unit coordinates as the reported hidden
+  /// ranges — a nested scan is given its caller's offset, so a link label
+  /// reports where the LABEL sits, not where the construct does.
+  ///
+  /// Anything mapping painted characters back to source needs this. Without
+  /// it, a caller can only re-derive the mapping by parsing the text a second
+  /// time with a second parser and aligning the two results heuristically,
+  /// which is what mobile did before #2360 — and the two parsers did not have
+  /// to agree.
+  final int visibleSourceStart;
+
+  /// Whether [text] is a verbatim slice of the source at [visibleSourceStart].
+  ///
+  /// True for ordinary text runs, so character `k` of [text] came from source
+  /// offset `visibleSourceStart + k`. False where the visible text is not in
+  /// the source at all — an image's alt text, a footnote marker, rendered
+  /// LaTeX — and every character of those maps to the construct's start.
+  bool get isVerbatimSlice => !isImage && !isFootnoteReference && !isLatex;
+
   bool get isImage => imageUrl != null;
   bool get isFootnoteReference => footnoteReferenceId != null;
   bool get isLatex => latexExpression != null;
@@ -249,6 +274,7 @@ class _InlineToken {
       style: style,
       linkUrl: url,
       sourceMarkdown: sourceMarkdown,
+      visibleSourceStart: visibleSourceStart,
     );
   }
 }

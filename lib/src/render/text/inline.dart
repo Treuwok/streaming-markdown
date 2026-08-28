@@ -15,20 +15,31 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
     }
     if (depth > 8) {
       return <_InlineToken>[
-        _InlineToken.text(text: text, style: style, sourceMarkdown: text),
+        _InlineToken.text(
+            text: text,
+            style: style,
+            sourceMarkdown: text,
+            visibleSourceStart: offset),
       ];
     }
 
     final List<_InlineToken> tokens = <_InlineToken>[];
     final StringBuffer plain = StringBuffer();
+    // Where the run currently in [plain] started in the source. A plain run is
+    // a verbatim slice, so this is what makes character `k` of it traceable to
+    // source offset `plainStart + k`.
+    int plainStart = offset;
 
     void flushPlain() {
       if (plain.isEmpty) {
         return;
       }
       final String value = plain.toString();
-      tokens.add(
-          _InlineToken.text(text: value, style: style, sourceMarkdown: value));
+      tokens.add(_InlineToken.text(
+          text: value,
+          style: style,
+          sourceMarkdown: value,
+          visibleSourceStart: plainStart));
       plain.clear();
     }
 
@@ -52,6 +63,7 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
               altText: image.alt,
               imageUrl: image.url,
               sourceMarkdown: text.substring(i, image.end),
+              visibleSourceStart: offset + i,
             ),
           );
           i = image.end;
@@ -77,6 +89,7 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
             _InlineToken.footnote(
               footnoteReferenceId: footnoteRef.id,
               sourceMarkdown: text.substring(i, footnoteRef.end),
+              visibleSourceStart: offset + i,
             ),
           );
           i = footnoteRef.end;
@@ -116,6 +129,8 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
                 style: style,
                 linkUrl: link.url,
                 sourceMarkdown: text.substring(i, link.end),
+                // The LABEL, not the construct: `[` is one code unit.
+                visibleSourceStart: offset + i + 1,
               ),
             );
           } else if (labelTokens.isEmpty) {
@@ -162,6 +177,9 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
                 style: style,
                 linkUrl: url,
                 sourceMarkdown: text.substring(i, angle.end),
+                // An autolink paints its URL, and that URL is a verbatim slice
+                // starting one code unit past the `<`.
+                visibleSourceStart: offset + i + 1,
               ),
             );
             i = angle.end;
@@ -195,6 +213,7 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
             latexExpression: latex.expression,
             latexDisplay: latex.display,
             sourceMarkdown: latex.sourceMarkdown,
+            visibleSourceStart: offset + i,
           ),
         );
         i = latex.end;
@@ -209,6 +228,11 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
             text: code.inner,
             style: style.copyWith(code: true),
             sourceMarkdown: text.substring(i, code.end),
+            // The span's CONTENT is verbatim; the backticks are not painted.
+            // `_matchDelimited` uses a symmetric marker run, so the opening
+            // one is half of what the match consumed beyond its content.
+            visibleSourceStart:
+                offset + i + (code.end - i - code.inner.length) ~/ 2,
           ),
         );
         i = code.end;
@@ -332,6 +356,9 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
         continue;
       }
 
+      if (plain.isEmpty) {
+        plainStart = offset + i;
+      }
       plain.write(text[i]);
       i += 1;
     }
