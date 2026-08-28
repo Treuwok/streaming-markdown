@@ -132,6 +132,17 @@ void main() {
     });
   });
 
+  testWidgets('a footnote-shaped label followed by `(` is a link candidate',
+      (tester) async {
+    // `[^note](https://…` — the footnote arm consumed `[^note]` before the
+    // link scan ever ran, and the rest fell through to plain text with the
+    // destination in it.
+    await tester.pumpWidget(
+        _host('see [^note](https://secret.example', withhold: true));
+    await tester.pump();
+    expect(_painted(tester), isNot(contains('secret.example')));
+  });
+
   group('a label whose whole content is suppressed', () {
     testWidgets('is not rebuilt as raw text', (tester) async {
       // The nested scan suppressed the entire label, so it produced no tokens

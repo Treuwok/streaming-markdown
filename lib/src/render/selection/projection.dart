@@ -14,10 +14,17 @@ extension _StreamingMarkdownSelectionProjectionBuilder
       switch (block.type) {
         case 'atx_heading':
         case 'setext_heading':
+          // Through the safety-aware helper, like paragraphs. Building the
+          // segment from raw source handed back a destination the renderer had
+          // refused to draw the moment anyone copied across the heading — the
+          // flag was enforced in paint and not in the projection built from
+          // the same scan.
           segments.add(
-            _MarkdownSelectionSegment.plain(
-              plainText: _headingText(block),
+            _inlineSelectionSegment(
+              _headingText(block),
               markdownText: raw,
+              linkReferences: linkReferences,
+              footnoteNumbers: footnoteNumbers,
               preserveBlockMarkdownOnPartial: true,
             ),
           );

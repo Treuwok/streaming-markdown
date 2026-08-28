@@ -64,7 +64,14 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
           text,
           i,
         );
-        if (footnoteRef != null) {
+        // A footnote-shaped label immediately followed by `(` is a link
+        // candidate, not a footnote: `[^note](https://…`. The footnote arm used
+        // to consume `[^note]` and let the rest fall through to plain text,
+        // which painted the destination this flag exists to hold back.
+        final bool footnoteOpensADestination = footnoteRef != null &&
+            footnoteRef.end < text.length &&
+            text.codeUnitAt(footnoteRef.end) == 40 /* ( */;
+        if (footnoteRef != null && !footnoteOpensADestination) {
           flushPlain();
           tokens.add(
             _InlineToken.footnote(

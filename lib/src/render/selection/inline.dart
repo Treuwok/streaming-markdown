@@ -7,6 +7,7 @@ extension _StreamingMarkdownSelectionInlineBuilder
     required String markdownText,
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
+    bool preserveBlockMarkdownOnPartial = false,
   }) {
     final String normalized = text.replaceAll('\r', '');
     final _InlineParseResult scan = _inlineParserFor(
@@ -63,6 +64,7 @@ extension _StreamingMarkdownSelectionInlineBuilder
       fallbackMarkdownText: scan.withheldFrom == null
           ? markdownText
           : scan.visibleSourceOf(normalized),
+      preserveBlockMarkdownOnPartial: preserveBlockMarkdownOnPartial,
     );
   }
 
