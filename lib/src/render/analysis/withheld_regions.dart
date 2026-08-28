@@ -45,6 +45,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   String source, {
   bool withholdIncompleteDestinations = true,
   bool suppressRawHtml = true,
+  bool sourceComplete = false,
 }) {
   if (source.isEmpty) {
     return const WithheldMarkdownRegions(
@@ -88,6 +89,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       references: references,
       withholdIncompleteDestinations: withholdIncompleteDestinations,
       suppressRawHtml: suppressRawHtml,
+      sourceComplete: sourceComplete,
     );
     final _InlineParseResult result =
         parser.scan(source.substring(block.start, block.end));

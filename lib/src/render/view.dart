@@ -112,6 +112,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     bool allowIncompleteInlineSyntax = false,
     bool withholdIncompleteDestinations = false,
     bool suppressRawHtml = false,
+    bool sourceComplete = false,
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
@@ -140,6 +141,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
           allowUnclosedInlineDelimiters: allowIncompleteInlineSyntax,
           withholdIncompleteDestinations: withholdIncompleteDestinations,
           suppressRawHtml: suppressRawHtml,
+          sourceComplete: sourceComplete,
           tokenArrivalDelay: tokenStaggerDelay,
           onTokenArrivalWait: onTokenDelay,
           onTokenFadeInEnd: onTokenAnimationEnd,
@@ -179,6 +181,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     bool allowIncompleteInlineSyntax = false,
     bool withholdIncompleteDestinations = false,
     bool suppressRawHtml = false,
+    bool sourceComplete = false,
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
@@ -215,6 +218,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
       allowIncompleteInlineSyntax: allowIncompleteInlineSyntax,
       withholdIncompleteDestinations: withholdIncompleteDestinations,
       suppressRawHtml: suppressRawHtml,
+      sourceComplete: sourceComplete,
       tokenStaggerDelay: tokenStaggerDelay,
       onTokenDelay: onTokenDelay,
       onTokenAnimationEnd: onTokenAnimationEnd,
@@ -266,6 +270,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     this.allowUnclosedInlineDelimiters = false,
     this.withholdIncompleteDestinations = false,
     this.suppressRawHtml = false,
+    this.sourceComplete = false,
     this.tokenArrivalDelay = Duration.zero,
     this.onTokenArrivalWait,
     this.onTokenFadeInEnd,
@@ -334,6 +339,9 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// Kept separate from [withholdIncompleteDestinations] on purpose — see
   /// `_InlineParser.suppressRawHtml`.
   final bool suppressRawHtml;
+
+  /// Whether no more source can arrive. See `_InlineParser.sourceComplete`.
+  final bool sourceComplete;
 
   /// Delay between adjacent token reveal starts.
   final Duration tokenArrivalDelay;

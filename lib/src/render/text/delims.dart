@@ -146,6 +146,7 @@ _InlineLinkScan _scanInlineLinkAt(
   String text,
   int start, {
   required Map<String, String> references,
+  required bool sourceComplete,
 }) {
   if (!text.startsWith('[', start)) {
     return const _InlineLinkScan.notALink();
@@ -154,8 +155,10 @@ _InlineLinkScan _scanInlineLinkAt(
   final int closeBracket = text.indexOf(']', start + 1);
   if (closeBracket == -1) {
     // An unclosed label is only a pending link while more source may follow;
-    // a newline ends the inline context and settles it as literal text.
-    return text.contains('\n', start)
+    // a newline ends the inline context, and so does the end of the source.
+    // Nothing that could be a destination has appeared yet, so releasing it
+    // shows the author's own text — holding it back would hide prose.
+    return text.contains('\n', start) || sourceComplete
         ? const _InlineLinkScan.notALink()
         : const _InlineLinkScan.incompleteDestination();
   }
@@ -188,7 +191,7 @@ _InlineLinkScan _scanInlineLinkAt(
   if (closeBracket + 1 < text.length && text[closeBracket + 1] == '[') {
     final int closeRef = text.indexOf(']', closeBracket + 2);
     if (closeRef == -1) {
-      return text.contains('\n', closeBracket)
+      return text.contains('\n', closeBracket) || sourceComplete
           ? const _InlineLinkScan.notALink()
           : const _InlineLinkScan.incompleteDestination();
     }
@@ -200,7 +203,11 @@ _InlineLinkScan _scanInlineLinkAt(
     if (url == null) {
       // The definition may still arrive later in the stream. Until it does,
       // the label is a reference whose destination is unknown — not text.
-      return const _InlineLinkScan.incompleteDestination();
+      // Once the source is final it never will, and no destination text is
+      // present to leak, so it settles as the prose it turned out to be.
+      return sourceComplete
+          ? const _InlineLinkScan.notALink()
+          : const _InlineLinkScan.incompleteDestination();
     }
     return _InlineLinkScan.matched(
       _InlineLinkMatch(label: label, url: url, end: closeRef + 1),
@@ -219,8 +226,11 @@ _InlineLinkScan _scanInlineLinkAt(
   }
 
   // `[label]` with no definition anywhere. Shortcut references resolve late
-  // in a stream, so this is a destination that has not arrived, not prose.
-  return const _InlineLinkScan.incompleteDestination();
+  // in a stream, so while it is still growing this is a destination that has
+  // not arrived; once it is final, it is prose.
+  return sourceComplete
+      ? const _InlineLinkScan.notALink()
+      : const _InlineLinkScan.incompleteDestination();
 }
 
 /// What an angle-bracket construct turned out to be, and where it ends.

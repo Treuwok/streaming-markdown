@@ -71,6 +71,7 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
           text,
           i,
           references: references,
+          sourceComplete: sourceComplete,
         );
         if (scan.kind == _InlineLinkScanKind.incompleteDestination &&
             withholdIncompleteDestinations) {

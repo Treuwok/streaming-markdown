@@ -126,6 +126,29 @@ void main() {
       expect(regions.hiddenCodeUnitRanges, isEmpty);
     });
 
+    test('settles prose once the source is final, but never a destination',
+        () {
+      // The two halves of the same call. `[not a link` has no destination in
+      // it, so holding it back after the stream ends would hide the author's
+      // own words; `[x](https://…` does, and the stream ending does not make
+      // showing it correct.
+      const String prose = 'see [not a link';
+      expect(
+        analyzeWithheldMarkdownRegions(prose, sourceComplete: true)
+            .safeEndCodeUnits,
+        prose.length,
+      );
+      expect(analyzeWithheldMarkdownRegions(prose).safeEndCodeUnits,
+          prose.indexOf('['));
+
+      const String truncated = 'see [x](https://secret.example';
+      expect(
+        analyzeWithheldMarkdownRegions(truncated, sourceComplete: true)
+            .safeEndCodeUnits,
+        truncated.indexOf('['),
+      );
+    });
+
     test('resolves a reference link against a definition anywhere in source',
         () {
       const String resolved = 'see [help][ref]\n\n[ref]: https://ok.example';

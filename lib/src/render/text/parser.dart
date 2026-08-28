@@ -35,6 +35,7 @@ final class _InlineParser {
     this.allowUnclosedDelimiters = false,
     this.withholdIncompleteDestinations = false,
     this.suppressRawHtml = false,
+    this.sourceComplete = false,
   });
 
   final Map<String, String> references;
@@ -51,6 +52,15 @@ final class _InlineParser {
   /// content that is complete — the host does not render raw HTML — so the two
   /// cannot share a flag without one of them lying about what it does.
   final bool suppressRawHtml;
+
+  /// Whether no more source can arrive.
+  ///
+  /// Only arms whose reason for holding back is "more may still arrive" change
+  /// when this is set, and only where no destination text is present to leak:
+  /// `[unclosed`, `[label][undefined]`, `[label]`. A destination that is
+  /// visibly mid-flight (`[x](https://…`, `<https://…`, `<a href="…`) keeps
+  /// being held back — the source ending does not make showing it correct.
+  final bool sourceComplete;
 
   final List<(int, int)> _hiddenRanges = <(int, int)>[];
   int? _withheldFrom;
@@ -95,6 +105,7 @@ extension _StreamingMarkdownInlineParserFactory on StreamingMarkdownRenderView {
       allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
       withholdIncompleteDestinations: withholdIncompleteDestinations,
       suppressRawHtml: suppressRawHtml,
+      sourceComplete: sourceComplete,
     );
   }
 }
