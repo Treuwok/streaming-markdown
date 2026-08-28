@@ -312,5 +312,10 @@ bool _blockHasNoInlineContent(MarkdownBlockNode block) {
   return block is GenericBlockNode &&
       (block.type == 'indented_code_block' ||
           block.type == 'front_matter' ||
+          // Paints a rule and a nothing respectively — no text either way, so
+          // treating their source as inline content credited `***` and a
+          // table's `|---|` as characters a reader could see.
+          block.type == 'thematic_break' ||
+          block.type == 'pipe_table_delimiter_row' ||
           block.type == 'link_reference_definition');
 }

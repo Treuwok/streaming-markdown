@@ -96,4 +96,17 @@ void main() {
     );
     expect(r.visibleText, isNot(contains('secret.example')));
   });
+
+  group('blocks that paint no text contribute none', () {
+    // Each of these draws a rule, a gap, or nothing at all. Counting their
+    // source as painted characters credited a reveal budget for text the
+    // reader never sees, and the cursor then ran ahead of the screen.
+    for (final String source in const <String>[
+      '***',
+      '---',
+      '[ref]: https://example.test',
+    ]) {
+      test(source, () => expect(_scan(source).visibleText, isEmpty));
+    }
+  });
 }
