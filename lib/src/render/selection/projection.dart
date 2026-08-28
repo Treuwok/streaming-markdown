@@ -57,11 +57,13 @@ extension _StreamingMarkdownSelectionProjectionBuilder
           break;
         case 'footnote_definition':
         case 'link_reference_definition':
+          // Through the scan, like paragraphs and headings: a footnote body is
+          // streamed too, so it can end mid-destination.
           final List<_FootnoteDefinition> definitions =
               _parseFootnoteDefinitions(raw);
           segments.add(
-            _MarkdownSelectionSegment.plain(
-              plainText: definitions.isEmpty
+            _inlineSelectionSegment(
+              definitions.isEmpty
                   ? raw
                   : definitions
                       .map(
@@ -70,15 +72,20 @@ extension _StreamingMarkdownSelectionProjectionBuilder
                       )
                       .join('\n'),
               markdownText: raw,
+              linkReferences: linkReferences,
+              footnoteNumbers: footnoteNumbers,
               preserveBlockMarkdownOnPartial: true,
             ),
           );
           break;
         case 'html_block':
+          // Suppressed blocks render nothing, so they contribute nothing to a
+          // selection either — otherwise copying returns markup the screen
+          // never showed.
           segments.add(
             _MarkdownSelectionSegment.plain(
-              plainText: _htmlBlockSelectionText(raw),
-              markdownText: raw,
+              plainText: suppressRawHtml ? '' : _htmlBlockSelectionText(raw),
+              markdownText: suppressRawHtml ? '' : raw,
               preserveBlockMarkdownOnPartial: true,
             ),
           );
@@ -102,10 +109,15 @@ extension _StreamingMarkdownSelectionProjectionBuilder
           ));
           break;
         default:
+          // Any block type not named above still carries inline text, so it
+          // goes through the scan as well. Leaving this on raw source is what
+          // made the named cases keep turning up one at a time.
           segments.add(
-            _MarkdownSelectionSegment.plain(
-              plainText: _contentOrRaw(block),
+            _inlineSelectionSegment(
+              _contentOrRaw(block),
               markdownText: raw,
+              linkReferences: linkReferences,
+              footnoteNumbers: footnoteNumbers,
             ),
           );
           break;

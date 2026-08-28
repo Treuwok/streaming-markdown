@@ -176,15 +176,17 @@ _InlineLinkScan _scanInlineLinkAt(
   final String label = text.substring(start + 1, closeBracket);
   if (label.isEmpty) {
     // `![](https://…` with no closing paren: the image scanner returns null
-    // because `)` has not arrived, and rejecting the leftover `[](…)` here on
-    // the empty label alone let the whole URL fall through as plain text. An
-    // empty alt is valid for a completed image, so the pending form is a
-    // candidate too.
-    final bool opensAnUnclosedDestination =
-        closeBracket + 1 < text.length &&
-            text[closeBracket + 1] == '(' &&
-            text.indexOf(')', closeBracket + 2) == -1;
-    return opensAnUnclosedDestination
+    // because `)` has not arrived, and rejecting the leftover on the empty
+    // label alone let the whole URL fall through as plain text.
+    //
+    // Only for an IMAGE though. An empty alt is valid for a completed image,
+    // but this parser rejects empty LINK labels outright — so without the `!`
+    // check, ordinary prose like `see [](just text` was truncated at the `[`.
+    final bool isImageCandidate = start > 0 && text.codeUnitAt(start - 1) == 33;
+    final bool opensAnUnclosedDestination = closeBracket + 1 < text.length &&
+        text[closeBracket + 1] == '(' &&
+        text.indexOf(')', closeBracket + 2) == -1;
+    return isImageCandidate && opensAnUnclosedDestination
         ? const _InlineLinkScan.incompleteDestination()
         : const _InlineLinkScan.notALink();
   }
@@ -356,17 +358,48 @@ _AngleScan _scanAngleAt(
   }
 
   // Attribute values may contain `>`; only an unquoted one closes the tag.
+  //
+  // The characters between the name and that `>` must actually look like an
+  // attribute list. Accepting anything was wrong in a way suppression makes
+  // visible: `math <a + b> done` is prose the renderer has always shown, and
+  // `+` cannot begin an attribute — deleting it is not "not rendering HTML",
+  // it is deleting the author's sentence. This is the HTML open-tag grammar,
+  // not a guess about what looks tag-like.
   int? quote;
+  bool inAttributeValue = false;
+  bool atAttributeStart = true;
   while (cursor < text.length) {
     final int unit = text.codeUnitAt(cursor);
     if (quote != null) {
       if (unit == quote) {
         quote = null;
+        inAttributeValue = false;
+        atAttributeStart = true;
       }
     } else if (unit == 34 /* " */ || unit == 39 /* ' */) {
       quote = unit;
     } else if (unit == 62 /* > */) {
       return _AngleScan(_AngleScanKind.html, cursor + 1);
+    } else if (unit == 61 /* = */) {
+      inAttributeValue = true;
+      atAttributeStart = false;
+    } else if (_isHtmlWhitespace(unit)) {
+      inAttributeValue = false;
+      atAttributeStart = true;
+    } else if (unit == 47 /* / */) {
+      inAttributeValue = false;
+    } else if (atAttributeStart) {
+      // Every attribute begins with a letter. The spec allows nearly any
+      // character LATER in a name, so checking the whole name lets `<a + b>`
+      // through — and suppression then deletes a sentence the renderer has
+      // always shown. The first character is the part that separates an
+      // attribute list from arbitrary prose.
+      if (!_isAsciiLetter(unit)) {
+        return const _AngleScan(_AngleScanKind.notAngleSyntax);
+      }
+      atAttributeStart = false;
+    } else if (!inAttributeValue && !_isHtmlAttributeNameChar(unit)) {
+      return const _AngleScan(_AngleScanKind.notAngleSyntax);
     }
     cursor += 1;
   }
@@ -439,3 +472,18 @@ bool _hasUnmatchedBacktick(String label) {
   }
   return count.isOdd;
 }
+
+bool _isHtmlWhitespace(int unit) =>
+    unit == 32 || unit == 9 || unit == 10 || unit == 13 || unit == 12;
+
+/// Characters an unquoted attribute name may contain, per the HTML spec:
+/// anything except whitespace, `"`, `'`, `>`, `/`, `=` and controls.
+bool _isHtmlAttributeNameChar(int unit) {
+  if (unit <= 32 || unit == 127) {
+    return false;
+  }
+  return unit != 34 && unit != 39 && unit != 62 && unit != 47 && unit != 61;
+}
+
+bool _isAsciiLetter(int unit) =>
+    (unit >= 65 && unit <= 90) || (unit >= 97 && unit <= 122);

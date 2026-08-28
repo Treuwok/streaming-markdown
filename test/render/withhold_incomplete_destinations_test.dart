@@ -221,6 +221,30 @@ void main() {
     });
   });
 
+  group('suppression must not delete the author sentence', () {
+    testWidgets('angle text that is not a legal tag stays', (tester) async {
+      // `+` cannot begin an attribute, so `<a + b>` is not raw HTML — the
+      // renderer has always shown it. Removing it is not "not rendering
+      // HTML", it is deleting a sentence.
+      await tester.pumpWidget(_host('math <a + b> done',
+          withhold: true, suppressHtml: true, complete: true));
+      await tester.pump();
+      // The MIDDLE is the assertion. Checking only the two ends passes while
+      // the sentence has a hole in it — the removed part is exactly what is
+      // between them.
+      expect(_painted(tester), contains('<a + b>'));
+    });
+
+    testWidgets('an empty label that is not an image stays', (tester) async {
+      // The empty-alt exception is for `![](…`. A bare `[](…` is not a link
+      // in this parser, so treating it as a pending one truncated prose.
+      await tester.pumpWidget(_host('see [](just text here',
+          withhold: true, complete: true));
+      await tester.pump();
+      expect(_painted(tester), contains('just text here'));
+    });
+  });
+
   group('suppressRawHtml', () {
     testWidgets('holds back a tag whose attribute is still arriving',
         (tester) async {

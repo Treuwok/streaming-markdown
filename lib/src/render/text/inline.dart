@@ -122,9 +122,16 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
             // The label produced no tokens because the nested scan SUPPRESSED
             // all of it — `[<a href="https://…">](https://ok)`. Rebuilding it
             // as raw text here paints the very `href` that scan refused to
-            // draw, and contradicts the hidden range it just reported. The
-            // fourth place that read "no tokens" as "no markup"; the other
-            // three were paint, reveal budget and selection.
+            // draw.
+            //
+            // The whole construct painted nothing, so the whole construct is
+            // what gets reported as hidden — not just the tag inside the
+            // label. Reporting only the inner range left `[](https://outer)`
+            // behind for anything that rebuilds text from the ranges, which
+            // put the OUTER destination into a copied selection.
+            _hiddenRanges
+                .removeWhere((range) => range.$1 >= offset + i);
+            _hiddenRanges.add((offset + i, offset + link.end));
           } else {
             for (final _InlineToken token in labelTokens) {
               if (token.isImage) {
