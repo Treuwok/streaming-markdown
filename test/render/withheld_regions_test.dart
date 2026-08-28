@@ -21,6 +21,29 @@ MarkdownRenderNode _paragraph(String source) => MarkdownRenderNode(
       content: source,
     );
 
+MarkdownRenderNode _htmlBlock(String source) => MarkdownRenderNode(
+      type: 'html_block',
+      depth: 0,
+      startByte: 0,
+      endByte: source.length,
+      startRow: 0,
+      endRow: 0,
+      raw: source,
+      content: source,
+    );
+
+Widget _hostNode(MarkdownRenderNode node) => MaterialApp(
+      home: Scaffold(
+        body: AnimatedStreamingMarkdown(
+          blocks: [node],
+          withholdIncompleteDestinations: true,
+          suppressRawHtml: true,
+          tokenStaggerDelay: Duration.zero,
+          tokenAnimationDuration: Duration.zero,
+        ),
+      ),
+    );
+
 Widget _host(String source) => MaterialApp(
       home: Scaffold(
         body: AnimatedStreamingMarkdown(
@@ -113,6 +136,25 @@ void main() {
       expect(analyzeWithheldMarkdownRegions(unresolved).safeEndCodeUnits,
           unresolved.indexOf('['),
           reason: 'the definition may still be in flight');
+    });
+  });
+
+  group('a whole block of raw HTML', () {
+    const String source = '<div>\n<a href="https://secret.example">b</a>\n</div>';
+
+    test('is reported as one hidden range covering the block', () {
+      final WithheldMarkdownRegions regions =
+          analyzeWithheldMarkdownRegions(source);
+      expect(regions.hiddenCodeUnitRanges, <(int, int)>[(0, source.length)]);
+    });
+
+    testWidgets('paints nothing, so the two answers agree', (tester) async {
+      await tester.pumpWidget(_hostNode(_htmlBlock(source)));
+      await tester.pump();
+      expect(_painted(tester), isEmpty,
+          reason: 'the analysis reports the block as painting nothing; if the '
+              'renderer drew it, the reveal cursor would credit visible text '
+              'the analysis said did not exist');
     });
   });
 

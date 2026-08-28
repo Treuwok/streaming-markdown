@@ -112,6 +112,12 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
       case 'pipe_table_delimiter_row':
         return const SizedBox.shrink();
       case 'html_block':
+        if (suppressRawHtml) {
+          // The analysis reports this block's whole range as painting nothing;
+          // rendering it here would make the two answers contradict each other,
+          // and the reveal cursor believes the analysis.
+          return const SizedBox.shrink();
+        }
         return _HtmlBlockCard(
           html: _normalizedRaw(node.raw),
           onLinkTap: (String url) => _onLinkPressed(context, url),
