@@ -20,6 +20,18 @@ final class _InlineParseResult {
 
   /// Code-unit ranges the scan recognised as raw HTML and did not draw.
   final List<(int start, int end)> hiddenRanges;
+
+  /// The part of [text] these tokens came from.
+  ///
+  /// [tokens] being empty has two causes that must not be confused: the text
+  /// genuinely has nothing in it, or everything in it was held back. Callers
+  /// that fall back to "just draw the source" on an empty list print the very
+  /// destination the scan refused to draw — so the fallback has to ask this,
+  /// not the list.
+  String visibleSourceOf(String text) {
+    final int? boundary = withheldFrom;
+    return boundary == null ? text : text.substring(0, boundary);
+  }
 }
 
 /// The inline grammar, detached from the widget that renders it.
@@ -56,17 +68,22 @@ final class _InlineParser {
   /// Whether no more source can arrive.
   ///
   /// Only arms whose reason for holding back is "more may still arrive" change
-  /// when this is set, and only where no destination text is present to leak:
-  /// `[unclosed`, `[label][undefined]`, `[label]`. A destination that is
-  /// visibly mid-flight (`[x](https://…`, `<https://…`, `<a href="…`) keeps
-  /// being held back — the source ending does not make showing it correct.
+  /// when this is set, and only where no destination is present to expose:
+  /// `[unclosed`, a label whose `]` sits inside a code span with no `](` in
+  /// reach, and an unterminated `<tag` carrying no attributes. A destination
+  /// that is visibly mid-flight (`[x](https://…`, `<a href="…`) keeps being
+  /// held back — the source ending does not make showing it correct.
+  ///
+  /// An unterminated autolink is in neither list: it is not held back at any
+  /// point, because its destination IS its visible text.
   final bool sourceComplete;
 
   final List<(int, int)> _hiddenRanges = <(int, int)>[];
   int? _withheldFrom;
 
   /// Scan [text] and report both halves of the outcome.
-  _InlineParseResult scan(String text, {_InlineStyle style = const _InlineStyle()}) {
+  _InlineParseResult scan(String text,
+      {_InlineStyle style = const _InlineStyle()}) {
     _hiddenRanges.clear();
     _withheldFrom = null;
     final List<_InlineToken> tokens = _parseInlineTokens(text, style: style);
@@ -76,13 +93,6 @@ final class _InlineParser {
       hiddenRanges: List<(int, int)>.unmodifiable(_hiddenRanges),
     );
   }
-
-  /// Scan [text] for rendering only.
-  List<_InlineToken> tokenize(
-    String text, {
-    _InlineStyle style = const _InlineStyle(),
-  }) =>
-      scan(text, style: style).tokens;
 
   /// Records the first position that was held back, in top-level coordinates.
   void _withholdAt(int offset) {

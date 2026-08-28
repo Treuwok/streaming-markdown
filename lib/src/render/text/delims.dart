@@ -171,7 +171,15 @@ _InlineLinkScan _scanInlineLinkAt(
     // `[foo `]` bar](https://…` — this `]` is inside a code span, so it is not
     // where the label ends. Any reading built on it is short, and painting the
     // difference paints the `](…)` that really follows.
-    return const _InlineLinkScan.incompleteDestination();
+    //
+    // Only while something could follow it, though. With no `](` in reach at
+    // all there is no destination for the short reading to expose, and holding
+    // back prose like ``the bracket [x`y] is fine`` would truncate a finished
+    // reply at the `[` — an over-hide that no leak test can see.
+    if (!sourceComplete || text.contains('](', start)) {
+      return const _InlineLinkScan.incompleteDestination();
+    }
+    return const _InlineLinkScan.notALink();
   }
 
   if (closeBracket + 1 < text.length && text[closeBracket + 1] == '(') {
@@ -280,7 +288,11 @@ class _AngleScan {
 /// legitimately span lines, so a newline is not evidence that it settled as
 /// text. An unterminated autolink is the opposite — CommonMark ends it at the
 /// line break — so a newline settles it, matching the inline-link scanner.
-_AngleScan _scanAngleAt(String text, int start) {
+_AngleScan _scanAngleAt(
+  String text,
+  int start, {
+  required bool sourceComplete,
+}) {
   if (start >= text.length || text.codeUnitAt(start) != 60 /* < */) {
     return const _AngleScan(_AngleScanKind.notAngleSyntax);
   }
@@ -301,9 +313,10 @@ _AngleScan _scanAngleAt(String text, int start) {
 
   if (text.startsWith('<!--', start)) {
     final int end = text.indexOf('-->', start + 4);
-    return end == -1
-        ? const _AngleScan(_AngleScanKind.incompleteHtml)
-        : _AngleScan(_AngleScanKind.html, end + 3);
+    if (end != -1) {
+      return _AngleScan(_AngleScanKind.html, end + 3);
+    }
+    return _unterminatedAngle(text, start, sourceComplete: sourceComplete);
   }
 
   final int nameStart = text.startsWith('</', start) ? start + 2 : start + 1;
@@ -336,7 +349,26 @@ _AngleScan _scanAngleAt(String text, int start) {
     }
     cursor += 1;
   }
-  return const _AngleScan(_AngleScanKind.incompleteHtml);
+  return _unterminatedAngle(text, start, sourceComplete: sourceComplete);
+}
+
+/// What an unterminated `<…` is once nothing more can arrive.
+///
+/// While the source grows it is a tag whose attributes — and any destination
+/// among them — are still on their way. Once it is final it is one of two
+/// things, and the difference is whether a destination is present at all:
+/// `<a href="https://…` still hides one, while `when n <m the value is fine`
+/// is a sentence. Holding the sentence back truncates a finished reply from
+/// the `<` onward, which no leak test can see.
+_AngleScan _unterminatedAngle(
+  String text,
+  int start, {
+  required bool sourceComplete,
+}) {
+  if (!sourceComplete || text.contains('=', start)) {
+    return const _AngleScan(_AngleScanKind.incompleteHtml);
+  }
+  return const _AngleScan(_AngleScanKind.notAngleSyntax);
 }
 
 bool _isHtmlTagNameStart(String text, int index) {

@@ -35,10 +35,8 @@ extension _StreamingMarkdownReferenceParsing on StreamingMarkdownRenderView {
 /// arrived is an unresolved destination, and both have to agree on that.
 void _addLinkReferencesFromRaw(String raw, Map<String, String> into) {
   final String normalized = raw.replaceAll('\r', '').trimRight();
-  for (final RegExpMatch match in RegExp(
-    r'^\s*\[([^\]]+)\]:\s*(\S+)',
-    multiLine: true,
-  ).allMatches(normalized)) {
+  for (final RegExpMatch match
+      in _linkReferenceDefinition.allMatches(normalized)) {
     final String name = _normalizeReferenceKey(match.group(1)!);
     final String url = _stripEnclosingAngles(match.group(2)!);
     if (name.isNotEmpty && url.isNotEmpty) {
@@ -46,3 +44,9 @@ void _addLinkReferencesFromRaw(String raw, Map<String, String> into) {
     }
   }
 }
+
+/// Compiled once: this runs per block, on every streamed chunk.
+final RegExp _linkReferenceDefinition = RegExp(
+  r'^\s*\[([^\]]+)\]:\s*(\S+)',
+  multiLine: true,
+);

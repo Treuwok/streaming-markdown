@@ -62,7 +62,7 @@ class _InlineImageMatch {
   final int end;
 }
 
-/// Why `_matchInlineLinkAt` cannot answer with a nullable match.
+/// Why `_scanInlineLinkAt` cannot answer with a nullable match.
 ///
 /// A null conflates two opposite facts: "this is not a link, paint the source
 /// as written" and "this IS a link whose destination has not arrived yet, so

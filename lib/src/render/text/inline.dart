@@ -34,6 +34,15 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
 
     int i = 0;
     while (i < text.length) {
+      if (_withheldFrom != null) {
+        // First thing in the loop, not halfway down it. A nested scan can set
+        // this, and the branches above the old guard (`![`, `[`, `<`) then ran
+        // anyway — so a second link AFTER the boundary got painted while the
+        // text before it was dropped, and the reply came out in the wrong
+        // order.
+        return tokens;
+      }
+
       if (text.startsWith('![', i)) {
         final _InlineImageMatch? image = _matchInlineImageAt(text, i);
         if (image != null) {
@@ -114,16 +123,14 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
               }
             }
           }
-          if (_withheldFrom != null) {
-            return tokens;
-          }
           i = link.end;
           continue;
         }
       }
 
       if (text.codeUnitAt(i) == 60 /* < */) {
-        final _AngleScan angle = _scanAngleAt(text, i);
+        final _AngleScan angle =
+            _scanAngleAt(text, i, sourceComplete: sourceComplete);
         switch (angle.kind) {
           case _AngleScanKind.autolink:
             flushPlain();
@@ -171,10 +178,6 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
         );
         i = latex.end;
         continue;
-      }
-
-      if (_withheldFrom != null) {
-        return tokens;
       }
 
       final _DelimitedMatch? code = _matchDelimited(text, i, '`');
@@ -306,10 +309,6 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
         );
         i = italicUnderscore.end;
         continue;
-      }
-
-      if (_withheldFrom != null) {
-        return tokens;
       }
 
       plain.write(text[i]);

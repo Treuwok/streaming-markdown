@@ -29,6 +29,7 @@ Widget _host(
   String source, {
   required bool withhold,
   bool suppressHtml = false,
+  bool complete = false,
 }) =>
     MaterialApp(
       home: Scaffold(
@@ -36,6 +37,7 @@ Widget _host(
           blocks: [_paragraph(source)],
           withholdIncompleteDestinations: withhold,
           suppressRawHtml: suppressHtml,
+          sourceComplete: complete,
           tokenStaggerDelay: Duration.zero,
           tokenAnimationDuration: Duration.zero,
         ),
@@ -106,6 +108,69 @@ void main() {
           reason:
               'this is the behaviour every existing caller depends on; the '
               'flag must be opt-in');
+    });
+  });
+
+  group('when the withheld construct is the first thing in the block', () {
+    // The scan returns an EMPTY token list here, and three separate consumers
+    // read an empty list as "nothing to render, draw the source instead" —
+    // which draws the destination the scan had just refused to draw. Every
+    // fixture in this file used to begin with `see `, so none of them reached
+    // it.
+    testWidgets('an in-flight link paints nothing at all', (tester) async {
+      await tester.pumpWidget(
+          _host('[help](https://secret.example', withhold: true));
+      await tester.pump();
+      expect(_painted(tester), isNot(contains('secret.example')));
+    });
+
+    testWidgets('an in-flight tag paints nothing at all', (tester) async {
+      await tester.pumpWidget(_host('<a href="https://secret.example',
+          withhold: true, suppressHtml: true));
+      await tester.pump();
+      expect(_painted(tester), isNot(contains('secret.example')));
+    });
+  });
+
+  group('a nested scan holding back stops the outer one too', () {
+    testWidgets('nothing after the boundary is painted', (tester) async {
+      // The guard used to sit halfway down the loop, so the branches above it
+      // ran anyway: emphasis recursion withheld at offset 1, the outer loop
+      // jumped past it, matched the SECOND link and painted that — text before
+      // the boundary dropped, text after it shown, reply out of order.
+      await tester.pumpWidget(_host(
+          '*[x](http://sec1*[y](http://sec2)',
+          withhold: true));
+      await tester.pump();
+      final String painted = _painted(tester);
+      expect(painted, isNot(contains('y')));
+      expect(painted, isNot(contains('sec')));
+    });
+  });
+
+  group('the end of the source releases prose, never a destination', () {
+    testWidgets('an unterminated angle with no attributes is a sentence',
+        (tester) async {
+      await tester.pumpWidget(_host('when n <m the value is fine',
+          withhold: true, suppressHtml: true, complete: true));
+      await tester.pump();
+      expect(_painted(tester), contains('the value is fine'));
+    });
+
+    testWidgets('an unterminated tag WITH an attribute stays held back',
+        (tester) async {
+      await tester.pumpWidget(_host('see <a href="https://secret.example',
+          withhold: true, suppressHtml: true, complete: true));
+      await tester.pump();
+      expect(_painted(tester), isNot(contains('secret.example')));
+    });
+
+    testWidgets('a backtick inside brackets does not truncate a finished reply',
+        (tester) async {
+      await tester.pumpWidget(_host('the bracket [x`y] is fine',
+          withhold: true, complete: true));
+      await tester.pump();
+      expect(_painted(tester), contains('is fine'));
     });
   });
 

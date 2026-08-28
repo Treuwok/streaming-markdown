@@ -112,12 +112,19 @@ void main() {
       expect(hiddenText, <String>['<a href="https://x.example">', '</a>']);
     });
 
-    test('a lone CR does not settle a candidate as prose', () {
-      // The CR substitution exists for block splitting. Letting the inline
-      // scan see the invented `\n` makes the "a newline ended this" arms fire
-      // on a destination that is still arriving, which releases it.
-      const String source = '[x](http://secret.example\rmore';
-      expect(analyzeWithheldMarkdownRegions(source).safeEndCodeUnits, 0);
+    test('the analysis stops at a lone CR rather than guess a block split', () {
+      // The block parser splits on LF alone, so this fence never closes for
+      // it and swallows the link — while a parser that honours CR ends the
+      // fence and renders the link. There is no reading both agree on, so the
+      // analysis stops at the CR. Without that, the destination below is
+      // inside code content as far as this scan can tell, and reaches paint.
+      const String source =
+          '```md\ncode\r```\r[help](https://secret.example';
+      final WithheldMarkdownRegions regions =
+          analyzeWithheldMarkdownRegions(source);
+      expect(regions.safeEndCodeUnits, source.indexOf('\r'));
+      expect(source.substring(0, regions.safeEndCodeUnits),
+          isNot(contains('secret.example')));
     });
 
     test('leaves a fenced code block alone', () {
@@ -201,6 +208,12 @@ void main() {
     // was not painted — which is the entire failure mode the second copy of
     // the grammar used to cause.
     const List<String> fixtures = <String>[
+      // With NO leading word. Every fixture here used to start with one, and
+      // that is why the empty-token path — where the withheld construct is the
+      // first thing in the block — went unnoticed while three renderers fell
+      // back to drawing the raw source.
+      '[help](https://secret.example',
+      '<a href="https://secret.example',
       'see [help](https://secret.example',
       'see [foo `]` bar](https://secret.example)',
       'see <a href="https://secret.example',
@@ -219,10 +232,18 @@ void main() {
         await tester.pump();
         final String painted = _painted(tester);
 
+        // Assert on the destinations themselves, not on the whole tail:
+        // `isNot(contains(tail))` passes as long as the tail is not painted
+        // VERBATIM, so painting just the URL out of it slips through.
         final String tail = source.substring(regions.safeEndCodeUnits);
-        if (tail.trim().length > 2) {
-          expect(painted, isNot(contains(tail)),
-              reason: 'the analysis said this tail is held back');
+        for (final String secret in const <String>[
+          'secret.example',
+          'private.example',
+        ]) {
+          if (tail.contains(secret)) {
+            expect(painted, isNot(contains(secret)),
+                reason: 'the analysis said this is held back');
+          }
         }
         for (final (int, int) range in regions.hiddenCodeUnitRanges) {
           final String hidden = source.substring(range.$1, range.$2);

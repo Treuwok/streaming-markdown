@@ -24,9 +24,6 @@ final class WithheldMarkdownRegions {
   /// non-overlapping. `[start, end)`, in the same code-unit coordinates.
   final List<(int start, int end)> hiddenCodeUnitRanges;
 
-  /// Whether any raw HTML was found. The caller needs this to decide whether
-  /// the painted text can be derived from the source at all.
-  bool get hasHiddenRanges => hiddenCodeUnitRanges.isNotEmpty;
 }
 
 /// Report which parts of [source] a renderer would refuse to draw.
@@ -38,14 +35,18 @@ final class WithheldMarkdownRegions {
 /// coordinates depend on which parser the caller happened to use. Everything
 /// here is measured in one unit against one string.
 ///
-/// [withholdIncompleteDestinations] and [suppressRawHtml] mean exactly what
-/// they mean on [StreamingMarkdownRenderView]; pass the same values the view
-/// is configured with, or the two answers describe different renderings.
+/// Every flag here means exactly what it means on
+/// [StreamingMarkdownRenderView] — including
+/// [allowUnclosedInlineDelimiters], which changes where emphasis ends and so
+/// changes where a nested scan reports from. Pass the same values the view is
+/// configured with, or the two answers describe different renderings, and
+/// nothing observes the difference.
 WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   String source, {
   bool withholdIncompleteDestinations = true,
   bool suppressRawHtml = true,
   bool sourceComplete = false,
+  bool allowUnclosedInlineDelimiters = false,
 }) {
   if (source.isEmpty) {
     return const WithheldMarkdownRegions(
@@ -54,20 +55,19 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     );
   }
 
-  // A lone CR is a line ending in CommonMark, but the block parser only splits
-  // on LF — so a fence closed with `\r` would stay open here while the
-  // renderer's own parser ends it, and the analysis would treat a link inside
-  // code content as one. Substituting is safe precisely because it is one code
-  // unit for one: every offset below still indexes the caller's string.
+  // A lone CR is a line ending in CommonMark and is not one to the block
+  // parser, which splits on LF alone. Rewriting it to `\n` before parsing was
+  // tried and is worse: the analysis then splits blocks differently from
+  // whichever parser produced the blocks being rendered, so a reported range
+  // can point at text that IS on screen — and the caller excises it, which
+  // desynchronises everything downstream that counts characters.
   //
-  // It is used for BLOCK SPLITTING ONLY. The inline scan reads the caller's
-  // original text, because several of its arms ask whether a newline has
-  // settled a candidate as literal — and handing them an invented `\n` makes
-  // them release a destination that is still in flight. That is the whole bug
-  // this comment exists to stop someone re-introducing.
-  final String lineNormalized =
-      source.replaceAllMapped(RegExp(r'\r(?!\n)'), (Match _) => '\n');
-  final RopeString rope = RopeString()..append(lineNormalized);
+  // There is no reading of a lone CR that both parsers agree on, so the
+  // analysis stops at the first one instead of guessing. It over-hides the
+  // remainder of such a message; a lone CR does not occur in the content this
+  // is built for, and over-hiding is the direction that cannot leak.
+  final int loneCarriageReturn = _firstLoneCarriageReturn(source);
+  final RopeString rope = RopeString()..append(source);
   final MarkdownDocument document = const RopeMarkdownParser().parse(rope);
 
   // Definitions first: a reference link whose definition has not arrived is an
@@ -85,7 +85,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   }
 
   final List<(int, int)> hidden = <(int, int)>[];
-  int safeEnd = source.length;
+  int safeEnd = loneCarriageReturn == -1 ? source.length : loneCarriageReturn;
 
   for (final MarkdownBlockNode block in document.blocks) {
     if (_blockHasNoInlineContent(block)) {
@@ -103,6 +103,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       withholdIncompleteDestinations: withholdIncompleteDestinations,
       suppressRawHtml: suppressRawHtml,
       sourceComplete: sourceComplete,
+      allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
     );
     final _InlineParseResult result =
         parser.scan(source.substring(block.start, block.end));
@@ -118,11 +119,31 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     }
   }
 
-  hidden.removeWhere(((int, int) range) => range.$1 >= safeEnd);
+  // Clip to the boundary rather than filtering on the start alone: a range
+  // that straddles it would otherwise reach the caller with an end past the
+  // string it is about to be applied to.
+  final List<(int, int)> clipped = <(int, int)>[];
+  for (final (int start, int end) range in hidden) {
+    if (range.$1 >= safeEnd) {
+      continue;
+    }
+    clipped.add((range.$1, range.$2 > safeEnd ? safeEnd : range.$2));
+  }
   return WithheldMarkdownRegions(
     safeEndCodeUnits: safeEnd,
-    hiddenCodeUnitRanges: List<(int, int)>.unmodifiable(hidden),
+    hiddenCodeUnitRanges: List<(int, int)>.unmodifiable(clipped),
   );
+}
+
+/// Index of the first CR that is not part of a CRLF, or -1.
+int _firstLoneCarriageReturn(String source) {
+  for (int i = 0; i < source.length; i++) {
+    if (source.codeUnitAt(i) == 13 &&
+        (i + 1 >= source.length || source.codeUnitAt(i + 1) != 10)) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 /// Blocks whose text is never inline-parsed, so nothing in them can leak.
