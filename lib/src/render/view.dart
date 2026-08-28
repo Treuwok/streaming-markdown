@@ -46,6 +46,7 @@ part 'api.dart';
 part 'text/blocks.dart';
 part 'text/tables.dart';
 part 'text/refs.dart';
+part 'text/parser.dart';
 part 'text/inline.dart';
 part 'text/delims.dart';
 part 'text/content.dart';

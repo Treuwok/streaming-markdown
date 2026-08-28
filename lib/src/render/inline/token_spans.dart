@@ -239,12 +239,10 @@ extension _StreamingMarkdownInlineTokenSpans on StreamingMarkdownRenderView {
     if (text.trim().isEmpty) {
       return 0;
     }
-    final List<_InlineToken> tokens = _parseInlineTokens(
-      text.replaceAll('\r', ''),
-      references: linkReferences,
-      allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
+    final List<_InlineToken> tokens = _inlineParserFor(
+      linkReferences,
       withholdIncompleteDestinations: withholdIncompleteDestinations,
-    );
+    ).tokenize(text.replaceAll('\r', ''));
     if (tokens.isEmpty) {
       return _inlineWordCount(text);
     }

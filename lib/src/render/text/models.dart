@@ -137,6 +137,22 @@ String _normalizeFootnoteKey(String key) {
   return key.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' ');
 }
 
+/// Reference keys and footnote keys normalise identically.
+String _normalizeReferenceKey(String key) {
+  return _normalizeFootnoteKey(key);
+}
+
+/// `<https://x>` -> `https://x`. Pure string work, shared by the grammar and
+/// by the reference-definition extractor, so it lives at library level rather
+/// than on either consumer.
+String _stripEnclosingAngles(String value) {
+  final String trimmed = value.trim();
+  if (trimmed.startsWith('<') && trimmed.endsWith('>') && trimmed.length > 2) {
+    return trimmed.substring(1, trimmed.length - 1);
+  }
+  return trimmed;
+}
+
 class _InlineStyle {
   const _InlineStyle({
     this.bold = false,

@@ -1,13 +1,14 @@
 part of '../view.dart';
 
-extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
+extension _StreamingMarkdownInlineParsing on _InlineParser {
+  /// [offset] is where [text] starts inside the text handed to [scan], so a
+  /// nested scan reports its findings in the caller's coordinates rather than
+  /// its own.
   List<_InlineToken> _parseInlineTokens(
     String text, {
     _InlineStyle style = const _InlineStyle(),
-    Map<String, String> references = const <String, String>{},
     int depth = 0,
-    bool allowUnclosedDelimiters = false,
-    bool withholdIncompleteDestinations = false,
+    int offset = 0,
   }) {
     if (text.isEmpty) {
       return <_InlineToken>[];
@@ -73,6 +74,7 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
         );
         if (scan.kind == _InlineLinkScanKind.incompleteDestination &&
             withholdIncompleteDestinations) {
+          _withholdAt(offset + i);
           // Stop here rather than falling through to the plain-text path. That
           // fall-through is what paints a destination still in flight: the
           // source is written out verbatim, URL included. Everything already
@@ -87,10 +89,8 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
           final List<_InlineToken> labelTokens = _parseInlineTokens(
             link.label,
             style: style,
-            references: references,
             depth: depth + 1,
-            allowUnclosedDelimiters: allowUnclosedDelimiters,
-            withholdIncompleteDestinations: withholdIncompleteDestinations,
+            offset: offset + i + 1,
           );
           if (labelTokens.isEmpty) {
             tokens.add(
@@ -113,6 +113,9 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
               }
             }
           }
+          if (_withheldFrom != null) {
+            return tokens;
+          }
           i = link.end;
           continue;
         }
@@ -123,6 +126,7 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
         if (end == -1 &&
             withholdIncompleteDestinations &&
             !text.contains('\n', i)) {
+          _withholdAt(offset + i);
           // `<https://…` with no closing `>` yet — same shape as above, and the
           // same leak: the plain-text path would write the URL out.
           flushPlain();
@@ -158,6 +162,10 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
         continue;
       }
 
+      if (_withheldFrom != null) {
+        return tokens;
+      }
+
       final _DelimitedMatch? code = _matchDelimited(text, i, '`');
       if (code != null) {
         flushPlain();
@@ -184,9 +192,8 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
           _parseInlineTokens(
             boldItalicStar.inner,
             style: style.copyWith(bold: true, italic: true),
-            references: references,
             depth: depth + 1,
-            allowUnclosedDelimiters: allowUnclosedDelimiters,
+            offset: offset + i + 3,
           ),
         );
         i = boldItalicStar.end;
@@ -205,9 +212,8 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
           _parseInlineTokens(
             boldItalicUnderscore.inner,
             style: style.copyWith(bold: true, italic: true),
-            references: references,
             depth: depth + 1,
-            allowUnclosedDelimiters: allowUnclosedDelimiters,
+            offset: offset + i + 3,
           ),
         );
         i = boldItalicUnderscore.end;
@@ -228,9 +234,8 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
           _parseInlineTokens(
             bold.inner,
             style: style.copyWith(bold: true),
-            references: references,
             depth: depth + 1,
-            allowUnclosedDelimiters: allowUnclosedDelimiters,
+            offset: offset + i + 2,
           ),
         );
         i = bold.end;
@@ -244,9 +249,8 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
           _parseInlineTokens(
             strike.inner,
             style: style.copyWith(strikethrough: true),
-            references: references,
             depth: depth + 1,
-            allowUnclosedDelimiters: allowUnclosedDelimiters,
+            offset: offset + i + 2,
           ),
         );
         i = strike.end;
@@ -265,9 +269,8 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
           _parseInlineTokens(
             italicStar.inner,
             style: style.copyWith(italic: true),
-            references: references,
             depth: depth + 1,
-            allowUnclosedDelimiters: allowUnclosedDelimiters,
+            offset: offset + i + 1,
           ),
         );
         i = italicStar.end;
@@ -286,13 +289,16 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
           _parseInlineTokens(
             italicUnderscore.inner,
             style: style.copyWith(italic: true),
-            references: references,
             depth: depth + 1,
-            allowUnclosedDelimiters: allowUnclosedDelimiters,
+            offset: offset + i + 1,
           ),
         );
         i = italicUnderscore.end;
         continue;
+      }
+
+      if (_withheldFrom != null) {
+        return tokens;
       }
 
       plain.write(text[i]);
@@ -302,136 +308,136 @@ extension _StreamingMarkdownInlineParsing on StreamingMarkdownRenderView {
     flushPlain();
     return tokens;
   }
+}
 
-  _LatexMatch? _matchLatexAt(String text, int start) {
-    if (start > 0 && text.codeUnitAt(start - 1) == 92) {
-      return null;
-    }
-
-    if (text.startsWith(r'\(', start)) {
-      return _matchDelimitedLatex(
-        text,
-        start,
-        open: r'\(',
-        close: r'\)',
-        display: false,
-      );
-    }
-    if (text.startsWith(r'\[', start)) {
-      return _matchDelimitedLatex(
-        text,
-        start,
-        open: r'\[',
-        close: r'\]',
-        display: true,
-      );
-    }
-    if (text.startsWith(r'$$', start)) {
-      return _matchDelimitedLatex(
-        text,
-        start,
-        open: r'$$',
-        close: r'$$',
-        display: true,
-      );
-    }
-    if (text.codeUnitAt(start) == 36) {
-      if (start + 1 >= text.length || text.codeUnitAt(start + 1) == 36) {
-        return null;
-      }
-      final _LatexMatch? match = _matchDelimitedLatex(
-        text,
-        start,
-        open: r'$',
-        close: r'$',
-        display: false,
-      );
-      if (match == null) {
-        return null;
-      }
-      return match;
-    }
+_LatexMatch? _matchLatexAt(String text, int start) {
+  if (start > 0 && text.codeUnitAt(start - 1) == 92) {
     return null;
   }
 
-  _LatexMatch? _matchDelimitedLatex(
-    String text,
-    int start, {
-    required String open,
-    required String close,
-    required bool display,
-  }) {
-    if (!text.startsWith(open, start)) {
-      return null;
-    }
-    final int contentStart = start + open.length;
-    final int closeStart = _findUnescapedDelimiter(text, close, contentStart);
-    if (closeStart == -1 || closeStart == contentStart) {
-      return null;
-    }
-    final int end = closeStart + close.length;
-    final String expression = text.substring(contentStart, closeStart).trim();
-    if (expression.isEmpty) {
-      return null;
-    }
-    return _LatexMatch(
-      expression: expression,
-      sourceMarkdown: text.substring(start, end),
-      display: display,
-      end: end,
+  if (text.startsWith(r'\(', start)) {
+    return _matchDelimitedLatex(
+      text,
+      start,
+      open: r'\(',
+      close: r'\)',
+      display: false,
     );
   }
-
-  int _findUnescapedDelimiter(String text, String delimiter, int start) {
-    int index = start;
-    while (index < text.length) {
-      final int found = text.indexOf(delimiter, index);
-      if (found == -1) {
-        return -1;
-      }
-      if (!_isEscaped(text, found)) {
-        return found;
-      }
-      index = found + delimiter.length;
-    }
-    return -1;
+  if (text.startsWith(r'\[', start)) {
+    return _matchDelimitedLatex(
+      text,
+      start,
+      open: r'\[',
+      close: r'\]',
+      display: true,
+    );
   }
-
-  bool _isEscaped(String text, int index) {
-    int slashCount = 0;
-    int cursor = index - 1;
-    while (cursor >= 0 && text.codeUnitAt(cursor) == 92) {
-      slashCount += 1;
-      cursor -= 1;
-    }
-    return slashCount.isOdd;
+  if (text.startsWith(r'$$', start)) {
+    return _matchDelimitedLatex(
+      text,
+      start,
+      open: r'$$',
+      close: r'$$',
+      display: true,
+    );
   }
-
-  _DelimitedMatch? _matchAnyDelimited(
-    String text,
-    int start,
-    List<String> delimiters, {
-    required bool allowUnclosedDelimiters,
-  }) {
-    for (final String delimiter in delimiters) {
-      final _DelimitedMatch? match = _matchDelimited(
-        text,
-        start,
-        delimiter,
-        allowUnclosedTail: allowUnclosedDelimiters,
-      );
-      if (match != null) {
-        return match;
-      }
-    }
-    return null;
-  }
-
-  _FootnoteReferenceMatch? _matchFootnoteReferenceAt(String text, int start) {
-    final Match? match = RegExp(r'\[\^([^\]]+)\]').matchAsPrefix(text, start);
-    if (match is! RegExpMatch) {
+  if (text.codeUnitAt(start) == 36) {
+    if (start + 1 >= text.length || text.codeUnitAt(start + 1) == 36) {
       return null;
     }
-    return _FootnoteReferenceMatch(id: match.group(1)!, end: match.end);
+    final _LatexMatch? match = _matchDelimitedLatex(
+      text,
+      start,
+      open: r'$',
+      close: r'$',
+      display: false,
+    );
+    if (match == null) {
+      return null;
+    }
+    return match;
   }
+  return null;
+}
+
+_LatexMatch? _matchDelimitedLatex(
+  String text,
+  int start, {
+  required String open,
+  required String close,
+  required bool display,
+}) {
+  if (!text.startsWith(open, start)) {
+    return null;
+  }
+  final int contentStart = start + open.length;
+  final int closeStart = _findUnescapedDelimiter(text, close, contentStart);
+  if (closeStart == -1 || closeStart == contentStart) {
+    return null;
+  }
+  final int end = closeStart + close.length;
+  final String expression = text.substring(contentStart, closeStart).trim();
+  if (expression.isEmpty) {
+    return null;
+  }
+  return _LatexMatch(
+    expression: expression,
+    sourceMarkdown: text.substring(start, end),
+    display: display,
+    end: end,
+  );
+}
+
+int _findUnescapedDelimiter(String text, String delimiter, int start) {
+  int index = start;
+  while (index < text.length) {
+    final int found = text.indexOf(delimiter, index);
+    if (found == -1) {
+      return -1;
+    }
+    if (!_isEscaped(text, found)) {
+      return found;
+    }
+    index = found + delimiter.length;
+  }
+  return -1;
+}
+
+bool _isEscaped(String text, int index) {
+  int slashCount = 0;
+  int cursor = index - 1;
+  while (cursor >= 0 && text.codeUnitAt(cursor) == 92) {
+    slashCount += 1;
+    cursor -= 1;
+  }
+  return slashCount.isOdd;
+}
+
+_DelimitedMatch? _matchAnyDelimited(
+  String text,
+  int start,
+  List<String> delimiters, {
+  required bool allowUnclosedDelimiters,
+}) {
+  for (final String delimiter in delimiters) {
+    final _DelimitedMatch? match = _matchDelimited(
+      text,
+      start,
+      delimiter,
+      allowUnclosedTail: allowUnclosedDelimiters,
+    );
+    if (match != null) {
+      return match;
+    }
+  }
+  return null;
+}
+
+_FootnoteReferenceMatch? _matchFootnoteReferenceAt(String text, int start) {
+  final Match? match = RegExp(r'\[\^([^\]]+)\]').matchAsPrefix(text, start);
+  if (match is! RegExpMatch) {
+    return null;
+  }
+  return _FootnoteReferenceMatch(id: match.group(1)!, end: match.end);
 }

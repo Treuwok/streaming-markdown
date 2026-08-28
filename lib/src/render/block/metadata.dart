@@ -99,11 +99,8 @@ extension _StreamingMarkdownMetadataRenderer on StreamingMarkdownRenderView {
       fontWeight: FontWeight.w700,
       color: const Color(0xFF8B949E),
     );
-    final List<_InlineToken> tokens = _parseInlineTokens(
-      definition.body.replaceAll('\r', ''),
-      references: linkReferences,
-      allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
-    );
+    final List<_InlineToken> tokens = _inlineParserFor(linkReferences)
+        .tokenize(definition.body.replaceAll('\r', ''));
     final Duration tokenFadeDuration = _resolvedTokenFadeInDuration();
     final _RevealScheduleScope? scheduleScope = _RevealScheduleScope.maybeOf(
       context,

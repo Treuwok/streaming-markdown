@@ -8,12 +8,10 @@ extension _StreamingMarkdownSelectionInlineBuilder
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
   }) {
-    final List<_InlineToken> tokens = _parseInlineTokens(
-      text.replaceAll('\r', ''),
-      references: linkReferences,
-      allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
+    final List<_InlineToken> tokens = _inlineParserFor(
+      linkReferences,
       withholdIncompleteDestinations: withholdIncompleteDestinations,
-    );
+    ).tokenize(text.replaceAll('\r', ''));
     final List<_MarkdownSelectionPiece> pieces = <_MarkdownSelectionPiece>[];
     for (final _InlineToken token in tokens) {
       if (token.isImage) {
