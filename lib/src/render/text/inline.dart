@@ -138,15 +138,6 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
             );
             i = angle.end;
             continue;
-          case _AngleScanKind.incompleteAutolink:
-            if (withholdIncompleteDestinations) {
-              // `<https://…` with no closing `>` yet — same shape as the link
-              // scanner's incomplete destination, and the same leak: the
-              // plain-text path below would write the URL out.
-              _withholdAt(offset + i);
-              flushPlain();
-              return tokens;
-            }
           case _AngleScanKind.incompleteHtml:
             if (suppressRawHtml) {
               // A tag whose attribute value is still arriving. Its `href` is

@@ -54,7 +54,14 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     );
   }
 
-  final RopeString rope = RopeString()..append(source);
+  // A lone CR is a line ending in CommonMark, but the block parser only
+  // splits on LF — so a fence closed with `\r` stays open here while the
+  // renderer's own parser ends it, and the analysis would call a link inside
+  // code content that is not. Substituting is safe precisely because it is one
+  // code unit for one: every offset below still indexes the caller's string.
+  final String lineNormalized =
+      source.replaceAllMapped(RegExp(r'\r(?!\n)'), (Match _) => '\n');
+  final RopeString rope = RopeString()..append(lineNormalized);
   final MarkdownDocument document = const RopeMarkdownParser().parse(rope);
 
   // Definitions first: a reference link whose definition has not arrived is an
@@ -65,7 +72,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     if (block is GenericBlockNode &&
         block.type == 'link_reference_definition') {
       _addLinkReferencesFromRaw(
-        source.substring(block.start, block.end),
+        lineNormalized.substring(block.start, block.end),
         references,
       );
     }
@@ -92,7 +99,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       sourceComplete: sourceComplete,
     );
     final _InlineParseResult result =
-        parser.scan(source.substring(block.start, block.end));
+        parser.scan(lineNormalized.substring(block.start, block.end));
     for (final (int start, int end) range in result.hiddenRanges) {
       hidden.add((block.start + range.$1, block.start + range.$2));
     }

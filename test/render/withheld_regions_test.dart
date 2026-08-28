@@ -187,7 +187,7 @@ void main() {
     // the grammar used to cause.
     const List<String> fixtures = <String>[
       'see [help](https://secret.example',
-      'see <https://secret.example',
+      'see [help][undefined-ref]',
       'see <a href="https://secret.example',
       'a <a href="https://x.example">b</a> c',
       'see [help](https://ok.example) after',

@@ -261,9 +261,6 @@ enum _AngleScanKind {
   /// A complete `<http://…>` / `<https://…>`.
   autolink,
 
-  /// An autolink whose closing `>` has not arrived.
-  incompleteAutolink,
-
   /// A complete raw HTML tag or comment.
   html,
 
@@ -298,9 +295,12 @@ _AngleScan _scanAngleAt(String text, int start) {
     if (end != -1) {
       return _AngleScan(_AngleScanKind.autolink, end + 1);
     }
-    return text.contains('\n', start)
-        ? const _AngleScan(_AngleScanKind.notAngleSyntax)
-        : const _AngleScan(_AngleScanKind.incompleteAutolink);
+    // Not withheld while it grows. An autolink's destination IS its visible
+    // text, so there is nothing hidden to protect — and the cross-platform
+    // parity contract records this case as url-visible, because the other
+    // renderer shows it too. Holding it back would be the over-hiding failure
+    // wearing the safety flag's clothes.
+    return const _AngleScan(_AngleScanKind.notAngleSyntax);
   }
 
   if (text.startsWith('<!--', start)) {

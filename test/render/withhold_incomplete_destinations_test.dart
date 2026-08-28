@@ -64,11 +64,17 @@ void main() {
           reason: 'the destination has not arrived; it must not be painted');
     });
 
-    testWidgets('holds back an autolink still in flight', (tester) async {
+    testWidgets('does NOT hold back an autolink still in flight',
+        (tester) async {
+      // An autolink's destination is its visible text — nothing is hidden
+      // behind a label, so there is nothing to protect. The spike held this
+      // back; the cross-platform parity contract records it as url-visible
+      // because the other renderer shows it, and hiding it here would be the
+      // over-hiding failure wearing the safety flag's clothes.
       await tester.pumpWidget(
-          _host('see <https://secret.example', withhold: true));
+          _host('see <https://visible.example', withhold: true));
       await tester.pump();
-      expect(_painted(tester), isNot(contains('secret.example')));
+      expect(_painted(tester), contains('visible.example'));
     });
 
     testWidgets('paints a destination once it has arrived', (tester) async {
