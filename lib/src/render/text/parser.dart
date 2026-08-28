@@ -29,8 +29,29 @@ final class _InlineParseResult {
   /// destination the scan refused to draw — so the fallback has to ask this,
   /// not the list.
   String visibleSourceOf(String text) {
-    final int? boundary = withheldFrom;
-    return boundary == null ? text : text.substring(0, boundary);
+    final int end = withheldFrom ?? text.length;
+    if (hiddenRanges.isEmpty) {
+      return text.substring(0, end);
+    }
+    // Hidden ranges count too. A label whose entire content was suppressed
+    // leaves no tokens and no boundary — only ranges — so a fallback that
+    // looked at the boundary alone handed back the whole source, including
+    // the destination the scan had just refused to draw.
+    final StringBuffer visible = StringBuffer();
+    int cursor = 0;
+    for (final (int start, int stop) range in hiddenRanges) {
+      if (range.$1 >= end) {
+        break;
+      }
+      if (range.$1 > cursor) {
+        visible.write(text.substring(cursor, range.$1));
+      }
+      cursor = range.$2 > cursor ? range.$2 : cursor;
+    }
+    if (cursor < end) {
+      visible.write(text.substring(cursor, end));
+    }
+    return visible.toString();
   }
 }
 

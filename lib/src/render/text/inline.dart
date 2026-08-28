@@ -102,7 +102,7 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
             depth: depth + 1,
             offset: offset + i + 1,
           );
-          if (labelTokens.isEmpty) {
+          if (labelTokens.isEmpty && _hiddenRanges.isEmpty) {
             tokens.add(
               _InlineToken.text(
                 text: link.label,
@@ -111,6 +111,13 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
                 sourceMarkdown: text.substring(i, link.end),
               ),
             );
+          } else if (labelTokens.isEmpty) {
+            // The label produced no tokens because the nested scan SUPPRESSED
+            // all of it — `[<a href="https://…">](https://ok)`. Rebuilding it
+            // as raw text here paints the very `href` that scan refused to
+            // draw, and contradicts the hidden range it just reported. The
+            // fourth place that read "no tokens" as "no markup"; the other
+            // three were paint, reveal budget and selection.
           } else {
             for (final _InlineToken token in labelTokens) {
               if (token.isImage) {

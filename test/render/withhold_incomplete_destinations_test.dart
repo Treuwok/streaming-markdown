@@ -132,6 +132,20 @@ void main() {
     });
   });
 
+  group('a label whose whole content is suppressed', () {
+    testWidgets('is not rebuilt as raw text', (tester) async {
+      // The nested scan suppressed the entire label, so it produced no tokens
+      // — and "no tokens" was read as "no markup here", which rebuilt the
+      // label from source and painted the href that had just been suppressed.
+      await tester.pumpWidget(_host(
+          '[<a href="https://secret.example">](https://ok.example)',
+          withhold: true,
+          suppressHtml: true));
+      await tester.pump();
+      expect(_painted(tester), isNot(contains('secret.example')));
+    });
+  });
+
   group('a nested scan holding back stops the outer one too', () {
     testWidgets('nothing after the boundary is painted', (tester) async {
       // The guard used to sit halfway down the loop, so the branches above it
