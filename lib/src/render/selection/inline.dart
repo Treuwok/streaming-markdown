@@ -61,9 +61,14 @@ extension _StreamingMarkdownSelectionInlineBuilder
       // Selection is built from the same scan as the paint, so it has to honour
       // the same boundary: copying a reply must not hand back a destination the
       // screen deliberately never showed.
-      fallbackMarkdownText: scan.withheldFrom == null
-          ? markdownText
-          : scan.visibleSourceOf(normalized),
+      // Hidden ranges count as much as a boundary does. A completed tag
+      // leaves `withheldFrom` null while recording a hidden range, and this
+      // branch then kept the raw source — so selecting the whole paragraph
+      // copied the `href` that was never drawn.
+      fallbackMarkdownText:
+          scan.withheldFrom == null && scan.hiddenRanges.isEmpty
+              ? markdownText
+              : scan.visibleSourceOf(normalized),
       preserveBlockMarkdownOnPartial: preserveBlockMarkdownOnPartial,
     );
   }

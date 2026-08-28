@@ -175,7 +175,18 @@ _InlineLinkScan _scanInlineLinkAt(
 
   final String label = text.substring(start + 1, closeBracket);
   if (label.isEmpty) {
-    return const _InlineLinkScan.notALink();
+    // `![](https://…` with no closing paren: the image scanner returns null
+    // because `)` has not arrived, and rejecting the leftover `[](…)` here on
+    // the empty label alone let the whole URL fall through as plain text. An
+    // empty alt is valid for a completed image, so the pending form is a
+    // candidate too.
+    final bool opensAnUnclosedDestination =
+        closeBracket + 1 < text.length &&
+            text[closeBracket + 1] == '(' &&
+            text.indexOf(')', closeBracket + 2) == -1;
+    return opensAnUnclosedDestination
+        ? const _InlineLinkScan.incompleteDestination()
+        : const _InlineLinkScan.notALink();
   }
   if (_hasUnmatchedBacktick(label)) {
     // `[foo `]` bar](https://…` — this `]` is inside a code span, so it is not
@@ -364,18 +375,28 @@ _AngleScan _scanAngleAt(
 
 /// What an unterminated `<…` is once nothing more can arrive.
 ///
-/// While the source grows it is a tag whose attributes — and any destination
-/// among them — are still on their way. Once it is final it is one of two
-/// things, and the difference is whether a destination is present at all:
-/// `<a href="https://…` still hides one, while `when n <m the value is fine`
-/// is a sentence. Holding the sentence back truncates a finished reply from
-/// the `<` onward, which no leak test can see.
+/// While the source grows, it is a tag whose attributes — and any destination
+/// among them — may still be on their way, so it is held back.
+///
+/// Once the source is final, nothing is "still arriving" and the flag's whole
+/// promise is vacuous: what is on the page is what the author wrote, exactly
+/// as it would render with the flag off. So it is released.
+///
+/// The one exception is a comment opener. `<!--` is the only construct here
+/// where the author said "do not show this", and a stream that stopped one
+/// chunk before `-->` did not withdraw that.
+///
+/// An earlier version asked instead whether the text contained an `=`, as a
+/// stand-in for "does it carry an attribute". That is a guess about an open
+/// set, and it was wrong in both directions within one review round:
+/// `Use T<U where x=1` was truncated as if it were a tag, and an unterminated
+/// comment was released as if it were prose.
 _AngleScan _unterminatedAngle(
   String text,
   int start, {
   required bool sourceComplete,
 }) {
-  if (!sourceComplete || text.contains('=', start)) {
+  if (!sourceComplete || text.startsWith('<!--', start)) {
     return const _AngleScan(_AngleScanKind.incompleteHtml);
   }
   return const _AngleScan(_AngleScanKind.notAngleSyntax);

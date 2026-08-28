@@ -174,18 +174,40 @@ void main() {
   });
 
   group('the end of the source releases prose, never a destination', () {
-    testWidgets('an unterminated angle with no attributes is a sentence',
+    testWidgets('an unterminated angle is the prose it turned out to be',
         (tester) async {
-      await tester.pumpWidget(_host('when n <m the value is fine',
-          withhold: true, suppressHtml: true, complete: true));
-      await tester.pump();
-      expect(_painted(tester), contains('the value is fine'));
+      // Both of these used to hinge on whether the text contained an `=`,
+      // which is a guess about an open set — and it was wrong both ways in
+      // one round. Once the source is final nothing is still arriving, so
+      // what is on the page is what the author wrote.
+      for (final String source in <String>[
+        'when n <m the value is fine',
+        'Use T<U where x=1 and it is fine',
+      ]) {
+        await tester.pumpWidget(_host(source,
+            withhold: true, suppressHtml: true, complete: true));
+        await tester.pump();
+        expect(_painted(tester), contains('fine'), reason: source);
+      }
     });
 
-    testWidgets('an unterminated tag WITH an attribute stays held back',
+    testWidgets('an unterminated comment stays hidden even when final',
         (tester) async {
-      await tester.pumpWidget(_host('see <a href="https://secret.example',
-          withhold: true, suppressHtml: true, complete: true));
+      // The one construct where the author said "do not show this". A stream
+      // that stopped a chunk before `-->` did not withdraw that.
+      await tester.pumpWidget(_host(
+          'note <!-- confidential https://secret.example',
+          withhold: true,
+          suppressHtml: true,
+          complete: true));
+      await tester.pump();
+      expect(_painted(tester), isNot(contains('secret.example')));
+    });
+
+    testWidgets('an image with empty alt still holds back its destination',
+        (tester) async {
+      await tester.pumpWidget(_host('see ![](https://secret.example',
+          withhold: true));
       await tester.pump();
       expect(_painted(tester), isNot(contains('secret.example')));
     });
