@@ -25,11 +25,17 @@ MarkdownRenderNode _paragraph(String source) => MarkdownRenderNode(
       content: source,
     );
 
-Widget _host(String source, {required bool withhold}) => MaterialApp(
+Widget _host(
+  String source, {
+  required bool withhold,
+  bool suppressHtml = false,
+}) =>
+    MaterialApp(
       home: Scaffold(
         body: AnimatedStreamingMarkdown(
           blocks: [_paragraph(source)],
           withholdIncompleteDestinations: withhold,
+          suppressRawHtml: suppressHtml,
           tokenStaggerDelay: Duration.zero,
           tokenAnimationDuration: Duration.zero,
         ),
@@ -94,6 +100,75 @@ void main() {
           reason:
               'this is the behaviour every existing caller depends on; the '
               'flag must be opt-in');
+    });
+  });
+
+  group('suppressRawHtml', () {
+    testWidgets('holds back a tag whose attribute is still arriving',
+        (tester) async {
+      // The same leak in a third costume: the scanner recognised exactly one
+      // `<…>` shape (an http autolink) and let a raw tag fall through to the
+      // plain-text path, `href` and all.
+      await tester.pumpWidget(
+          _host('see <a href="https://secret.example', withhold: true,
+              suppressHtml: true));
+      await tester.pump();
+      expect(_painted(tester), isNot(contains('secret.example')));
+    });
+
+    testWidgets('does not draw a completed tag', (tester) async {
+      await tester.pumpWidget(_host(
+          'see <a href="https://ok.example">label</a> done',
+          withhold: true,
+          suppressHtml: true));
+      await tester.pump();
+      final String painted = _painted(tester);
+      expect(painted, isNot(contains('ok.example')));
+      expect(painted, contains('label'),
+          reason: 'the tag goes, the text it wrapped stays');
+      expect(painted, contains('done'),
+          reason: 'a closed tag must not swallow what follows it');
+    });
+
+    testWidgets('a greater-than inside an attribute does not close the tag',
+        (tester) async {
+      await tester.pumpWidget(_host(
+          'see <a title="a > b" href="https://secret.example',
+          withhold: true,
+          suppressHtml: true));
+      await tester.pump();
+      expect(_painted(tester), isNot(contains('secret.example')),
+          reason: 'quote-aware scanning; the naive `indexOf(">")` leaks here');
+    });
+
+    testWidgets('a greater-than inside a comment body does not close it',
+        (tester) async {
+      await tester.pumpWidget(_host('see <!-- a > b https://secret.example',
+          withhold: true, suppressHtml: true));
+      await tester.pump();
+      expect(_painted(tester), isNot(contains('secret.example')));
+    });
+
+    testWidgets('leaves angle text that cannot start a tag alone',
+        (tester) async {
+      // `<mailto:` and `x < 5` are not tags. Hiding them would be the
+      // over-hiding failure, which is the one nobody notices in a smoke test.
+      await tester.pumpWidget(_host('use x < 5 and <mailto:a@b> today',
+          withhold: true, suppressHtml: true));
+      await tester.pump();
+      final String painted = _painted(tester);
+      expect(painted, contains('x < 5'));
+      expect(painted, contains('mailto:a@b'));
+    });
+
+    testWidgets('is off by default — a tag still renders as literal source',
+        (tester) async {
+      await tester.pumpWidget(_host('see <a href="https://secret.example">x</a>',
+          withhold: true));
+      await tester.pump();
+      expect(_painted(tester), contains('secret.example'),
+          reason: 'upstream draws unsupported HTML verbatim; that is the '
+              'behaviour existing callers get unless they opt out');
     });
   });
 }

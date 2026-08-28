@@ -121,30 +121,49 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
         }
       }
 
-      if (text.startsWith('<http://', i) || text.startsWith('<https://', i)) {
-        final int end = text.indexOf('>', i + 1);
-        if (end == -1 &&
-            withholdIncompleteDestinations &&
-            !text.contains('\n', i)) {
-          _withholdAt(offset + i);
-          // `<https://…` with no closing `>` yet — same shape as above, and the
-          // same leak: the plain-text path would write the URL out.
-          flushPlain();
-          return tokens;
-        }
-        if (end != -1) {
-          flushPlain();
-          final String url = text.substring(i + 1, end);
-          tokens.add(
-            _InlineToken.text(
-              text: url,
-              style: style,
-              linkUrl: url,
-              sourceMarkdown: text.substring(i, end + 1),
-            ),
-          );
-          i = end + 1;
-          continue;
+      if (text.codeUnitAt(i) == 60 /* < */) {
+        final _AngleScan angle = _scanAngleAt(text, i);
+        switch (angle.kind) {
+          case _AngleScanKind.autolink:
+            flushPlain();
+            final String url = text.substring(i + 1, angle.end - 1);
+            tokens.add(
+              _InlineToken.text(
+                text: url,
+                style: style,
+                linkUrl: url,
+                sourceMarkdown: text.substring(i, angle.end),
+              ),
+            );
+            i = angle.end;
+            continue;
+          case _AngleScanKind.incompleteAutolink:
+            if (withholdIncompleteDestinations) {
+              // `<https://…` with no closing `>` yet — same shape as the link
+              // scanner's incomplete destination, and the same leak: the
+              // plain-text path below would write the URL out.
+              _withholdAt(offset + i);
+              flushPlain();
+              return tokens;
+            }
+          case _AngleScanKind.incompleteHtml:
+            if (suppressRawHtml) {
+              // A tag whose attribute value is still arriving. Its `href` is
+              // exactly the kind of destination that must not reach the screen
+              // while it is in flight.
+              _withholdAt(offset + i);
+              flushPlain();
+              return tokens;
+            }
+          case _AngleScanKind.html:
+            if (suppressRawHtml) {
+              flushPlain();
+              _hiddenRanges.add((offset + i, offset + angle.end));
+              i = angle.end;
+              continue;
+            }
+          case _AngleScanKind.notAngleSyntax:
+            break;
         }
       }
 

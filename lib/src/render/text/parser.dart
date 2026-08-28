@@ -34,6 +34,7 @@ final class _InlineParser {
     this.references = const <String, String>{},
     this.allowUnclosedDelimiters = false,
     this.withholdIncompleteDestinations = false,
+    this.suppressRawHtml = false,
   });
 
   final Map<String, String> references;
@@ -41,6 +42,15 @@ final class _InlineParser {
 
   /// Hold back inline text whose link destination has not arrived yet.
   final bool withholdIncompleteDestinations;
+
+  /// Do not draw raw HTML at all, and report where it was.
+  ///
+  /// Deliberately a separate question from
+  /// [withholdIncompleteDestinations]: that one is about a destination still
+  /// in flight, which appears once it arrives. This one is a decision about
+  /// content that is complete — the host does not render raw HTML — so the two
+  /// cannot share a flag without one of them lying about what it does.
+  final bool suppressRawHtml;
 
   final List<(int, int)> _hiddenRanges = <(int, int)>[];
   int? _withheldFrom;
@@ -84,6 +94,7 @@ extension _StreamingMarkdownInlineParserFactory on StreamingMarkdownRenderView {
       references: references,
       allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
       withholdIncompleteDestinations: withholdIncompleteDestinations,
+      suppressRawHtml: suppressRawHtml,
     );
   }
 }

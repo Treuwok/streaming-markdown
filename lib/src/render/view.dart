@@ -107,6 +107,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     bool asSliver = false,
     bool allowIncompleteInlineSyntax = false,
     bool withholdIncompleteDestinations = false,
+    bool suppressRawHtml = false,
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
@@ -134,6 +135,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
           sliver: asSliver,
           allowUnclosedInlineDelimiters: allowIncompleteInlineSyntax,
           withholdIncompleteDestinations: withholdIncompleteDestinations,
+          suppressRawHtml: suppressRawHtml,
           tokenArrivalDelay: tokenStaggerDelay,
           onTokenArrivalWait: onTokenDelay,
           onTokenFadeInEnd: onTokenAnimationEnd,
@@ -172,6 +174,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     bool asSliver = false,
     bool allowIncompleteInlineSyntax = false,
     bool withholdIncompleteDestinations = false,
+    bool suppressRawHtml = false,
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
@@ -207,6 +210,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
       asSliver: asSliver,
       allowIncompleteInlineSyntax: allowIncompleteInlineSyntax,
       withholdIncompleteDestinations: withholdIncompleteDestinations,
+      suppressRawHtml: suppressRawHtml,
       tokenStaggerDelay: tokenStaggerDelay,
       onTokenDelay: onTokenDelay,
       onTokenAnimationEnd: onTokenAnimationEnd,
@@ -257,6 +261,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     this.sliver = false,
     this.allowUnclosedInlineDelimiters = false,
     this.withholdIncompleteDestinations = false,
+    this.suppressRawHtml = false,
     this.tokenArrivalDelay = Duration.zero,
     this.onTokenArrivalWait,
     this.onTokenFadeInEnd,
@@ -313,6 +318,18 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// When on, tokenising stops at the unresolved construct and resumes from
   /// the same source on the next frame; nothing before it is affected.
   final bool withholdIncompleteDestinations;
+
+  /// Never draw raw HTML; report where it was instead.
+  ///
+  /// Off by default: upstream writes an unsupported tag out as literal source.
+  /// A host that does not render HTML at all needs it gone from paint AND
+  /// needs its coordinates, because anything that maps painted text back onto
+  /// the source (a reveal cursor, a caption timeline) has to know which part
+  /// of the source produced nothing.
+  ///
+  /// Kept separate from [withholdIncompleteDestinations] on purpose — see
+  /// `_InlineParser.suppressRawHtml`.
+  final bool suppressRawHtml;
 
   /// Delay between adjacent token reveal starts.
   final Duration tokenArrivalDelay;

@@ -222,3 +222,123 @@ _InlineLinkScan _scanInlineLinkAt(
   // in a stream, so this is a destination that has not arrived, not prose.
   return const _InlineLinkScan.incompleteDestination();
 }
+
+/// What an angle-bracket construct turned out to be, and where it ends.
+///
+/// The inline scanner used to recognise exactly one `<…>` shape — an http(s)
+/// autolink — and let everything else fall through to the plain-text path.
+/// That fall-through is the same one the link scanner's `null` took: a raw tag
+/// whose attribute value is still arriving gets written out verbatim, URL
+/// included.
+enum _AngleScanKind {
+  /// Not angle syntax at all (`x < 5`, `<mailto:a@b>`, a lone `<`).
+  notAngleSyntax,
+
+  /// A complete `<http://…>` / `<https://…>`.
+  autolink,
+
+  /// An autolink whose closing `>` has not arrived.
+  incompleteAutolink,
+
+  /// A complete raw HTML tag or comment.
+  html,
+
+  /// A raw HTML tag or comment that has not closed yet.
+  incompleteHtml,
+}
+
+class _AngleScan {
+  const _AngleScan(this.kind, [this.end = -1]);
+
+  final _AngleScanKind kind;
+
+  /// Exclusive end offset; only meaningful for [_AngleScanKind.autolink] and
+  /// [_AngleScanKind.html].
+  final int end;
+}
+
+/// Classify the `<` at [start].
+///
+/// Unterminated HTML stays unterminated across newlines on purpose: a tag may
+/// legitimately span lines, so a newline is not evidence that it settled as
+/// text. An unterminated autolink is the opposite — CommonMark ends it at the
+/// line break — so a newline settles it, matching the inline-link scanner.
+_AngleScan _scanAngleAt(String text, int start) {
+  if (start >= text.length || text.codeUnitAt(start) != 60 /* < */) {
+    return const _AngleScan(_AngleScanKind.notAngleSyntax);
+  }
+
+  if (text.startsWith('<http://', start) ||
+      text.startsWith('<https://', start)) {
+    final int end = text.indexOf('>', start + 1);
+    if (end != -1) {
+      return _AngleScan(_AngleScanKind.autolink, end + 1);
+    }
+    return text.contains('\n', start)
+        ? const _AngleScan(_AngleScanKind.notAngleSyntax)
+        : const _AngleScan(_AngleScanKind.incompleteAutolink);
+  }
+
+  if (text.startsWith('<!--', start)) {
+    final int end = text.indexOf('-->', start + 4);
+    return end == -1
+        ? const _AngleScan(_AngleScanKind.incompleteHtml)
+        : _AngleScan(_AngleScanKind.html, end + 3);
+  }
+
+  final int nameStart = text.startsWith('</', start) ? start + 2 : start + 1;
+  if (!_isHtmlTagNameStart(text, nameStart)) {
+    return const _AngleScan(_AngleScanKind.notAngleSyntax);
+  }
+
+  int cursor = nameStart;
+  while (cursor < text.length && _isHtmlTagNameChar(text.codeUnitAt(cursor))) {
+    cursor += 1;
+  }
+  if (cursor < text.length && !_isHtmlTagNameTerminator(text.codeUnitAt(cursor))) {
+    // `<mailto:a@b>` and friends: a name character sequence that does not end
+    // the way a tag name ends is not a tag, so it keeps its old rendering.
+    return const _AngleScan(_AngleScanKind.notAngleSyntax);
+  }
+
+  // Attribute values may contain `>`; only an unquoted one closes the tag.
+  int? quote;
+  while (cursor < text.length) {
+    final int unit = text.codeUnitAt(cursor);
+    if (quote != null) {
+      if (unit == quote) {
+        quote = null;
+      }
+    } else if (unit == 34 /* " */ || unit == 39 /* ' */) {
+      quote = unit;
+    } else if (unit == 62 /* > */) {
+      return _AngleScan(_AngleScanKind.html, cursor + 1);
+    }
+    cursor += 1;
+  }
+  return const _AngleScan(_AngleScanKind.incompleteHtml);
+}
+
+bool _isHtmlTagNameStart(String text, int index) {
+  if (index >= text.length) {
+    return false;
+  }
+  final int unit = text.codeUnitAt(index);
+  return (unit >= 65 && unit <= 90) || (unit >= 97 && unit <= 122);
+}
+
+bool _isHtmlTagNameChar(int unit) {
+  return (unit >= 65 && unit <= 90) ||
+      (unit >= 97 && unit <= 122) ||
+      (unit >= 48 && unit <= 57) ||
+      unit == 45 /* - */;
+}
+
+bool _isHtmlTagNameTerminator(int unit) {
+  return unit == 62 /* > */ ||
+      unit == 47 /* / */ ||
+      unit == 32 ||
+      unit == 9 ||
+      unit == 10 ||
+      unit == 13;
+}
