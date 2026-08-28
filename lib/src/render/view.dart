@@ -451,10 +451,12 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     required List<MarkdownRenderNode> nodes,
     required String selectedPlainText,
     bool allowUnclosedInlineDelimiters = false,
+    bool suppressRawHtml = false,
   }) {
     final StreamingMarkdownRenderView view = StreamingMarkdownRenderView(
       nodes: nodes,
       allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+      suppressRawHtml: suppressRawHtml,
     );
     final List<MarkdownRenderNode> blocks =
         view._collectRenderableBlocks(nodes);

@@ -202,22 +202,33 @@ void main() {
     });
   });
 
-  group('a whole block of raw HTML', () {
+  group('a block of raw HTML', () {
+    // This group used to assert the opposite — that the whole block is hidden
+    // and paints nothing. That rule threw away the prose between the tags, so
+    // an answer wrapped in `<div>` disappeared. The tag-hiding half of it is
+    // what mattered and is asserted below; the text-keeping half has its own
+    // file, `raw_html_block_keeps_its_text_test.dart`.
     const String source = '<div>\n<a href="https://secret.example">b</a>\n</div>';
 
-    test('is reported as one hidden range covering the block', () {
+    test('hides every tag in it, and only the tags', () {
       final WithheldMarkdownRegions regions =
           analyzeWithheldMarkdownRegions(source);
-      expect(regions.hiddenCodeUnitRanges, <(int, int)>[(0, source.length)]);
+      final StringBuffer hidden = StringBuffer();
+      for (final (int start, int end) range in regions.hiddenCodeUnitRanges) {
+        hidden.write(source.substring(range.$1, range.$2));
+      }
+      expect(hidden.toString(),
+          '<div><a href="https://secret.example"></a></div>');
     });
 
-    testWidgets('paints nothing, so the two answers agree', (tester) async {
+    testWidgets('paints the label without the destination', (tester) async {
       await tester.pumpWidget(_hostNode(_htmlBlock(source)));
       await tester.pump();
-      expect(_painted(tester), isEmpty,
-          reason: 'the analysis reports the block as painting nothing; if the '
-              'renderer drew it, the reveal cursor would credit visible text '
-              'the analysis said did not exist');
+      final String painted = _painted(tester);
+      expect(painted, isNot(contains('secret.example')),
+          reason: 'an attribute is not visible text');
+      expect(painted, contains('b'),
+          reason: 'the text the tags wrapped is the answer');
     });
   });
 
