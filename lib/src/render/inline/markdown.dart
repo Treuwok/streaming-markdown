@@ -22,13 +22,20 @@ extension _StreamingMarkdownInlineMarkdownRenderer
         const TextStyle(fontSize: 16);
     final bool compacted = _TokenCompactionScope.isCompacted(context);
     final bool animatePerWord = !compacted;
-    final List<_InlineToken> tokens = _parseInlineTokens(
-      normalized,
-      references: linkReferences,
-      allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
-    );
+    final _InlineParseResult scan = _inlineParserFor(
+      linkReferences,
+      withholdIncompleteDestinations: withholdIncompleteDestinations,
+    ).scan(normalized);
+    final List<_InlineToken> tokens = scan.tokens;
     if (tokens.isEmpty) {
-      return Text(normalized, style: resolvedStyle);
+      // NOT `normalized`. An empty list also means "everything here was held
+      // back", and drawing the source then prints the destination the scan
+      // just refused to draw.
+      final String visible = scan.visibleSourceOf(normalized);
+      if (visible.isEmpty) {
+        return const SizedBox.shrink();
+      }
+      return Text(visible, style: resolvedStyle);
     }
     final String selectableText = _plainTextForVisualInlineTokens(
       tokens,

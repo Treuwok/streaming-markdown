@@ -122,6 +122,16 @@ extension _StreamingMarkdownBlockCache on StreamingMarkdownRenderView {
       ..write(':')
       ..write(allowUnclosedInlineDelimiters)
       ..write(':')
+      // Everything that changes what the scan produces belongs in this key.
+      // These three were added without it, so flipping `sourceComplete` at the
+      // end of a stream reused the cached blocks and the held-back tail of the
+      // reply never appeared — permanently, and with nothing to notice.
+      ..write(withholdIncompleteDestinations)
+      ..write(':')
+      ..write(suppressRawHtml)
+      ..write(':')
+      ..write(sourceComplete)
+      ..write(':')
       ..write(debugTokenHighlight)
       ..write(':')
       ..write(enableTextSelection)

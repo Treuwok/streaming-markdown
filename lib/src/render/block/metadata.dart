@@ -99,11 +99,14 @@ extension _StreamingMarkdownMetadataRenderer on StreamingMarkdownRenderView {
       fontWeight: FontWeight.w700,
       color: const Color(0xFF8B949E),
     );
-    final List<_InlineToken> tokens = _parseInlineTokens(
-      definition.body.replaceAll('\r', ''),
-      references: linkReferences,
-      allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
-    );
+    // A footnote body is streamed like any other text, so it can end mid
+    // destination too.
+    final List<_InlineToken> tokens = _inlineParserFor(
+      linkReferences,
+      withholdIncompleteDestinations: withholdIncompleteDestinations,
+    )
+        .scan(definition.body.replaceAll('\r', ''))
+        .tokens;
     final Duration tokenFadeDuration = _resolvedTokenFadeInDuration();
     final _RevealScheduleScope? scheduleScope = _RevealScheduleScope.maybeOf(
       context,

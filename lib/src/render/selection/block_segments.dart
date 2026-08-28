@@ -96,9 +96,36 @@ extension _StreamingMarkdownSelectionBlockSegments
     return '$indent$marker$task ';
   }
 
-  _MarkdownSelectionSegment _quoteSelectionSegment(MarkdownRenderNode node) {
+  _MarkdownSelectionSegment _quoteSelectionSegment(
+    MarkdownRenderNode node, {
+    required Map<String, String> linkReferences,
+    required Map<String, int> footnoteNumbers,
+  }) {
     final String raw = _normalizedRaw(node.raw);
     final String plain = _quoteText(node);
+
+    // A quote's text is inline-parsed like any paragraph's, so it can contain
+    // a destination the paint path refused to draw. This helper built its
+    // piece straight from the quote text and raw source, so selecting across
+    // the quote copied that destination.
+    //
+    // Only the withholding case is diverted: with nothing held back the
+    // construction below is unchanged, which keeps the quote's own
+    // partial-range behaviour intact for every ordinary quote.
+    final _InlineParseResult scan = _inlineParserFor(
+      linkReferences,
+      withholdIncompleteDestinations: withholdIncompleteDestinations,
+    ).scan(plain);
+    if (scan.withheldFrom != null || scan.hiddenRanges.isNotEmpty) {
+      return _inlineSelectionSegment(
+        plain,
+        markdownText: raw,
+        linkReferences: linkReferences,
+        footnoteNumbers: footnoteNumbers,
+        preserveBlockMarkdownOnPartial: true,
+      );
+    }
+
     return _MarkdownSelectionSegment(
       pieces: <_MarkdownSelectionPiece>[
         _MarkdownSelectionPiece(plainText: plain, markdownText: raw),

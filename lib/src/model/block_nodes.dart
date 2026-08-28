@@ -1,12 +1,17 @@
 /// Base type for parsed block-level Markdown nodes.
 abstract class MarkdownBlockNode {
-  /// Creates a block node with byte range `[start, end)`.
+  /// Creates a block node covering `[start, end)` of the source string.
   const MarkdownBlockNode({required this.start, required this.end});
 
-  /// Inclusive start byte offset of the node in source text.
+  /// Inclusive start offset of the node in the source string.
+  ///
+  /// UTF-16 code units, the unit `String` is indexed in — NOT bytes, despite
+  /// what the mirrored `MarkdownRenderNode.startByte` is called. They differ
+  /// the moment the source stops being ASCII.
   final int start;
 
-  /// Exclusive end byte offset of the node in source text.
+  /// Exclusive end offset of the node in the source string, in the same units
+  /// as [start].
   final int end;
 }
 

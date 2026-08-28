@@ -62,6 +62,33 @@ class _InlineImageMatch {
   final int end;
 }
 
+/// Why `_scanInlineLinkAt` cannot answer with a nullable match.
+///
+/// A null conflates two opposite facts: "this is not a link, paint the source
+/// as written" and "this IS a link whose destination has not arrived yet, so
+/// painting the source as written puts the destination on screen". Streaming
+/// makes the second one routine — every transport chunk can land mid-URL — and
+/// the caller has no way to tell them apart, so it paints both.
+///
+/// Splitting the return type is what makes the distinction available at all.
+/// The scanner already knows which branch it took; it was simply discarding
+/// that on the way out.
+enum _InlineLinkScanKind { matched, notALink, incompleteDestination }
+
+class _InlineLinkScan {
+  const _InlineLinkScan.matched(_InlineLinkMatch this.match)
+      : kind = _InlineLinkScanKind.matched;
+  const _InlineLinkScan.notALink()
+      : kind = _InlineLinkScanKind.notALink,
+        match = null;
+  const _InlineLinkScan.incompleteDestination()
+      : kind = _InlineLinkScanKind.incompleteDestination,
+        match = null;
+
+  final _InlineLinkScanKind kind;
+  final _InlineLinkMatch? match;
+}
+
 class _InlineLinkMatch {
   const _InlineLinkMatch({
     required this.label,
@@ -108,6 +135,22 @@ int? _footnoteNumberForId(Map<String, int> footnoteNumbers, String id) {
 
 String _normalizeFootnoteKey(String key) {
   return key.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' ');
+}
+
+/// Reference keys and footnote keys normalise identically.
+String _normalizeReferenceKey(String key) {
+  return _normalizeFootnoteKey(key);
+}
+
+/// `<https://x>` -> `https://x`. Pure string work, shared by the grammar and
+/// by the reference-definition extractor, so it lives at library level rather
+/// than on either consumer.
+String _stripEnclosingAngles(String value) {
+  final String trimmed = value.trim();
+  if (trimmed.startsWith('<') && trimmed.endsWith('>') && trimmed.length > 2) {
+    return trimmed.substring(1, trimmed.length - 1);
+  }
+  return trimmed;
 }
 
 class _InlineStyle {

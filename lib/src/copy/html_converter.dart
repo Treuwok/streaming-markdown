@@ -218,11 +218,10 @@ class _MarkdownHtmlSelectionConverter {
   }
 
   String _convertInline(String markdown) {
-    final List<_InlineToken> tokens = view._parseInlineTokens(
-      markdown.replaceAll('\r', ''),
-      references: linkReferences,
-      allowUnclosedDelimiters: view.allowUnclosedInlineDelimiters,
-    );
+    final List<_InlineToken> tokens = view
+        ._inlineParserFor(linkReferences)
+        .scan(markdown.replaceAll('\r', ''))
+        .tokens;
     final StringBuffer out = StringBuffer();
     for (final _InlineToken token in tokens) {
       if (token.isImage) {

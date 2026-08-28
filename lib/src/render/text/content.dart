@@ -1,20 +1,6 @@
 part of '../view.dart';
 
 extension _StreamingMarkdownContentParsing on StreamingMarkdownRenderView {
-  String _normalizeReferenceKey(String key) {
-    return _normalizeFootnoteKey(key);
-  }
-
-  String _stripEnclosingAngles(String value) {
-    final String trimmed = value.trim();
-    if (trimmed.startsWith('<') &&
-        trimmed.endsWith('>') &&
-        trimmed.length > 2) {
-      return trimmed.substring(1, trimmed.length - 1);
-    }
-    return trimmed;
-  }
-
   String _contentOrRaw(MarkdownRenderNode node) {
     if (node.content.trim().isNotEmpty) {
       return node.content.trim();

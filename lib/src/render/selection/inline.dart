@@ -7,12 +7,14 @@ extension _StreamingMarkdownSelectionInlineBuilder
     required String markdownText,
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
+    bool preserveBlockMarkdownOnPartial = false,
   }) {
-    final List<_InlineToken> tokens = _parseInlineTokens(
-      text.replaceAll('\r', ''),
-      references: linkReferences,
-      allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
-    );
+    final String normalized = text.replaceAll('\r', '');
+    final _InlineParseResult scan = _inlineParserFor(
+      linkReferences,
+      withholdIncompleteDestinations: withholdIncompleteDestinations,
+    ).scan(normalized);
+    final List<_InlineToken> tokens = scan.tokens;
     final List<_MarkdownSelectionPiece> pieces = <_MarkdownSelectionPiece>[];
     for (final _InlineToken token in tokens) {
       if (token.isImage) {
@@ -56,7 +58,18 @@ extension _StreamingMarkdownSelectionInlineBuilder
     }
     return _MarkdownSelectionSegment(
       pieces: pieces,
-      fallbackMarkdownText: markdownText,
+      // Selection is built from the same scan as the paint, so it has to honour
+      // the same boundary: copying a reply must not hand back a destination the
+      // screen deliberately never showed.
+      // Hidden ranges count as much as a boundary does. A completed tag
+      // leaves `withheldFrom` null while recording a hidden range, and this
+      // branch then kept the raw source — so selecting the whole paragraph
+      // copied the `href` that was never drawn.
+      fallbackMarkdownText:
+          scan.withheldFrom == null && scan.hiddenRanges.isEmpty
+              ? markdownText
+              : scan.visibleSourceOf(normalized),
+      preserveBlockMarkdownOnPartial: preserveBlockMarkdownOnPartial,
     );
   }
 

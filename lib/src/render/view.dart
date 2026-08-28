@@ -39,6 +39,9 @@ import 'selection/web_copy_interceptor_stub.dart'
 import '../copy/clipboard_handler.dart';
 import '../copy/selection_strategy.dart';
 import '../model/render_node.dart';
+import '../model/block_nodes.dart';
+import '../model/rope.dart';
+import '../parser/rope_markdown_parser.dart';
 import '../worker/parse_worker_stub.dart'
     if (dart.library.ffi) '../worker/parse_worker.dart';
 
@@ -46,6 +49,8 @@ part 'api.dart';
 part 'text/blocks.dart';
 part 'text/tables.dart';
 part 'text/refs.dart';
+part 'text/parser.dart';
+part 'analysis/withheld_regions.dart';
 part 'text/inline.dart';
 part 'text/delims.dart';
 part 'text/content.dart';
@@ -105,6 +110,9 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     super.padding = EdgeInsets.zero,
     bool asSliver = false,
     bool allowIncompleteInlineSyntax = false,
+    bool withholdIncompleteDestinations = false,
+    bool suppressRawHtml = false,
+    bool sourceComplete = false,
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
@@ -131,6 +139,9 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
           emptyPlaceholder: placeholder,
           sliver: asSliver,
           allowUnclosedInlineDelimiters: allowIncompleteInlineSyntax,
+          withholdIncompleteDestinations: withholdIncompleteDestinations,
+          suppressRawHtml: suppressRawHtml,
+          sourceComplete: sourceComplete,
           tokenArrivalDelay: tokenStaggerDelay,
           onTokenArrivalWait: onTokenDelay,
           onTokenFadeInEnd: onTokenAnimationEnd,
@@ -168,6 +179,13 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     EdgeInsetsGeometry padding = EdgeInsets.zero,
     bool asSliver = false,
     bool allowIncompleteInlineSyntax = false,
+    bool withholdIncompleteDestinations = false,
+    bool suppressRawHtml = false,
+    // Defaults to true here and false on the streaming constructor: this one
+    // is handed a whole document at once, so there is no later chunk that
+    // could close an open construct and streaming semantics would hold back
+    // the end of a finished text for good.
+    bool sourceComplete = true,
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,
@@ -202,6 +220,9 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
       padding: padding,
       asSliver: asSliver,
       allowIncompleteInlineSyntax: allowIncompleteInlineSyntax,
+      withholdIncompleteDestinations: withholdIncompleteDestinations,
+      suppressRawHtml: suppressRawHtml,
+      sourceComplete: sourceComplete,
       tokenStaggerDelay: tokenStaggerDelay,
       onTokenDelay: onTokenDelay,
       onTokenAnimationEnd: onTokenAnimationEnd,
@@ -251,6 +272,9 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     this.padding = const EdgeInsets.all(12),
     this.sliver = false,
     this.allowUnclosedInlineDelimiters = false,
+    this.withholdIncompleteDestinations = false,
+    this.suppressRawHtml = false,
+    this.sourceComplete = false,
     this.tokenArrivalDelay = Duration.zero,
     this.onTokenArrivalWait,
     this.onTokenFadeInEnd,
@@ -289,6 +313,39 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// Allows unfinished inline emphasis/link delimiters to render during
   /// streaming instead of waiting for the closing delimiter.
   final bool allowUnclosedInlineDelimiters;
+
+  /// Holds back inline text whose link destination has not arrived yet.
+  ///
+  /// Off by default: the historical behaviour is to paint an unresolved
+  /// `[label](https://…` or `<https://…` as literal source, which puts the
+  /// destination on screen for as long as the rest of it is in flight. That is
+  /// harmless for a document already on disk and wrong for a stream, where
+  /// every chunk boundary can land inside a URL.
+  ///
+  /// This is deliberately NOT the same question as
+  /// [allowUnclosedInlineDelimiters], which governs emphasis — text that is
+  /// visible either way. A destination is text the author never intended to
+  /// show at all, so "render it early" and "render it late" are not two styles
+  /// of the same choice.
+  ///
+  /// When on, tokenising stops at the unresolved construct and resumes from
+  /// the same source on the next frame; nothing before it is affected.
+  final bool withholdIncompleteDestinations;
+
+  /// Never draw raw HTML; report where it was instead.
+  ///
+  /// Off by default: upstream writes an unsupported tag out as literal source.
+  /// A host that does not render HTML at all needs it gone from paint AND
+  /// needs its coordinates, because anything that maps painted text back onto
+  /// the source (a reveal cursor, a caption timeline) has to know which part
+  /// of the source produced nothing.
+  ///
+  /// Kept separate from [withholdIncompleteDestinations] on purpose — see
+  /// `_InlineParser.suppressRawHtml`.
+  final bool suppressRawHtml;
+
+  /// Whether no more source can arrive. See `_InlineParser.sourceComplete`.
+  final bool sourceComplete;
 
   /// Delay between adjacent token reveal starts.
   final Duration tokenArrivalDelay;

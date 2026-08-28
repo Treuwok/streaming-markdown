@@ -14,10 +14,17 @@ extension _StreamingMarkdownSelectionProjectionBuilder
       switch (block.type) {
         case 'atx_heading':
         case 'setext_heading':
+          // Through the safety-aware helper, like paragraphs. Building the
+          // segment from raw source handed back a destination the renderer had
+          // refused to draw the moment anyone copied across the heading — the
+          // flag was enforced in paint and not in the projection built from
+          // the same scan.
           segments.add(
-            _MarkdownSelectionSegment.plain(
-              plainText: _headingText(block),
+            _inlineSelectionSegment(
+              _headingText(block),
               markdownText: raw,
+              linkReferences: linkReferences,
+              footnoteNumbers: footnoteNumbers,
               preserveBlockMarkdownOnPartial: true,
             ),
           );
@@ -42,7 +49,11 @@ extension _StreamingMarkdownSelectionProjectionBuilder
           );
           break;
         case 'block_quote':
-          segments.add(_quoteSelectionSegment(block));
+          segments.add(_quoteSelectionSegment(
+            block,
+            linkReferences: linkReferences,
+            footnoteNumbers: footnoteNumbers,
+          ));
           break;
         case 'fenced_code_block':
         case 'indented_code_block':
@@ -50,11 +61,13 @@ extension _StreamingMarkdownSelectionProjectionBuilder
           break;
         case 'footnote_definition':
         case 'link_reference_definition':
+          // Through the scan, like paragraphs and headings: a footnote body is
+          // streamed too, so it can end mid-destination.
           final List<_FootnoteDefinition> definitions =
               _parseFootnoteDefinitions(raw);
           segments.add(
-            _MarkdownSelectionSegment.plain(
-              plainText: definitions.isEmpty
+            _inlineSelectionSegment(
+              definitions.isEmpty
                   ? raw
                   : definitions
                       .map(
@@ -63,15 +76,20 @@ extension _StreamingMarkdownSelectionProjectionBuilder
                       )
                       .join('\n'),
               markdownText: raw,
+              linkReferences: linkReferences,
+              footnoteNumbers: footnoteNumbers,
               preserveBlockMarkdownOnPartial: true,
             ),
           );
           break;
         case 'html_block':
+          // Suppressed blocks render nothing, so they contribute nothing to a
+          // selection either — otherwise copying returns markup the screen
+          // never showed.
           segments.add(
             _MarkdownSelectionSegment.plain(
-              plainText: _htmlBlockSelectionText(raw),
-              markdownText: raw,
+              plainText: suppressRawHtml ? '' : _htmlBlockSelectionText(raw),
+              markdownText: suppressRawHtml ? '' : raw,
               preserveBlockMarkdownOnPartial: true,
             ),
           );
@@ -95,10 +113,15 @@ extension _StreamingMarkdownSelectionProjectionBuilder
           ));
           break;
         default:
+          // Any block type not named above still carries inline text, so it
+          // goes through the scan as well. Leaving this on raw source is what
+          // made the named cases keep turning up one at a time.
           segments.add(
-            _MarkdownSelectionSegment.plain(
-              plainText: _contentOrRaw(block),
+            _inlineSelectionSegment(
+              _contentOrRaw(block),
               markdownText: raw,
+              linkReferences: linkReferences,
+              footnoteNumbers: footnoteNumbers,
             ),
           );
           break;
