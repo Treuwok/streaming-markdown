@@ -221,6 +221,39 @@ void main() {
     });
   });
 
+  testWidgets('a block quote projects the same boundary paint does',
+      (tester) async {
+    // Quotes build their selection through their own helper, which was never
+    // routed through the scan — so copying across one returned the
+    // destination paint had refused to show.
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AnimatedStreamingMarkdown(
+          blocks: [
+            MarkdownRenderNode(
+              type: 'block_quote',
+              depth: 0,
+              startByte: 0,
+              endByte: 32,
+              startRow: 0,
+              endRow: 0,
+              raw: '> see [x](https://secret.example',
+              content: '> see [x](https://secret.example',
+            ),
+          ],
+          withholdIncompleteDestinations: true,
+          suppressRawHtml: true,
+          enableSelection: true,
+          ownsSelectionArea: true,
+          tokenStaggerDelay: Duration.zero,
+          tokenAnimationDuration: Duration.zero,
+        ),
+      ),
+    ));
+    await tester.pump();
+    expect(_painted(tester), isNot(contains('secret.example')));
+  });
+
   group('suppression must not delete the author sentence', () {
     testWidgets('angle text that is not a legal tag stays', (tester) async {
       // `+` cannot begin an attribute, so `<a + b>` is not raw HTML — the

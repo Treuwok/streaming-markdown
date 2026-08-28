@@ -49,7 +49,11 @@ extension _StreamingMarkdownSelectionProjectionBuilder
           );
           break;
         case 'block_quote':
-          segments.add(_quoteSelectionSegment(block));
+          segments.add(_quoteSelectionSegment(
+            block,
+            linkReferences: linkReferences,
+            footnoteNumbers: footnoteNumbers,
+          ));
           break;
         case 'fenced_code_block':
         case 'indented_code_block':
