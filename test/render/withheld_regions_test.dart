@@ -112,6 +112,14 @@ void main() {
       expect(hiddenText, <String>['<a href="https://x.example">', '</a>']);
     });
 
+    test('a lone CR does not settle a candidate as prose', () {
+      // The CR substitution exists for block splitting. Letting the inline
+      // scan see the invented `\n` makes the "a newline ended this" arms fire
+      // on a destination that is still arriving, which releases it.
+      const String source = '[x](http://secret.example\rmore';
+      expect(analyzeWithheldMarkdownRegions(source).safeEndCodeUnits, 0);
+    });
+
     test('leaves a fenced code block alone', () {
       // Over-hiding is the failure a leak test cannot see: a code fence is
       // deliberately showing its contents, including syntax that would be

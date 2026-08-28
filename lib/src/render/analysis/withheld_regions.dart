@@ -54,11 +54,17 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     );
   }
 
-  // A lone CR is a line ending in CommonMark, but the block parser only
-  // splits on LF — so a fence closed with `\r` stays open here while the
-  // renderer's own parser ends it, and the analysis would call a link inside
-  // code content that is not. Substituting is safe precisely because it is one
-  // code unit for one: every offset below still indexes the caller's string.
+  // A lone CR is a line ending in CommonMark, but the block parser only splits
+  // on LF — so a fence closed with `\r` would stay open here while the
+  // renderer's own parser ends it, and the analysis would treat a link inside
+  // code content as one. Substituting is safe precisely because it is one code
+  // unit for one: every offset below still indexes the caller's string.
+  //
+  // It is used for BLOCK SPLITTING ONLY. The inline scan reads the caller's
+  // original text, because several of its arms ask whether a newline has
+  // settled a candidate as literal — and handing them an invented `\n` makes
+  // them release a destination that is still in flight. That is the whole bug
+  // this comment exists to stop someone re-introducing.
   final String lineNormalized =
       source.replaceAllMapped(RegExp(r'\r(?!\n)'), (Match _) => '\n');
   final RopeString rope = RopeString()..append(lineNormalized);
@@ -72,7 +78,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     if (block is GenericBlockNode &&
         block.type == 'link_reference_definition') {
       _addLinkReferencesFromRaw(
-        lineNormalized.substring(block.start, block.end),
+        source.substring(block.start, block.end),
         references,
       );
     }
@@ -99,7 +105,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       sourceComplete: sourceComplete,
     );
     final _InlineParseResult result =
-        parser.scan(lineNormalized.substring(block.start, block.end));
+        parser.scan(source.substring(block.start, block.end));
     for (final (int start, int end) range in result.hiddenRanges) {
       hidden.add((block.start + range.$1, block.start + range.$2));
     }
