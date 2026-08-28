@@ -154,11 +154,21 @@ _InlineLinkScan _scanInlineLinkAt(
 
   final int closeBracket = text.indexOf(']', start + 1);
   if (closeBracket == -1) {
-    // An unclosed label is only a pending link while more source may follow;
-    // a newline ends the inline context, and so does the end of the source.
-    // Nothing that could be a destination has appeared yet, so releasing it
-    // shows the author's own text — holding it back would hide prose.
-    return text.contains('\n', start) || sourceComplete
+    // Released once no more source can arrive — deliberately NOT on "a newline
+    // already ended this line".
+    //
+    // That newline test was wrong three times for one reason: it asks about the
+    // shape of the text THIS scanner was handed, and the renderer is handed a
+    // different string. A block's raw slice carries the trailing newline its
+    // rendered content does not; a list item's raw carries the continuation
+    // break its joined content does not; a lone CR ends a line for one parser
+    // and not the other. Each time the arm fired here and not there, and a
+    // destination still in flight was released.
+    //
+    // Not depending on it at all is what closes that class. The cost is
+    // over-holding a bracket in mid-stream prose, which the source ending then
+    // releases; the cost of the other direction is a URL on screen.
+    return sourceComplete
         ? const _InlineLinkScan.notALink()
         : const _InlineLinkScan.incompleteDestination();
   }
@@ -187,9 +197,9 @@ _InlineLinkScan _scanInlineLinkAt(
     if (closeParen == -1) {
       // `[label](https://…` with no closing paren yet — the destination is
       // mid-flight. This is the leak: painting the source here shows the URL.
-      return text.contains('\n', closeBracket)
-          ? const _InlineLinkScan.notALink()
-          : const _InlineLinkScan.incompleteDestination();
+      // Never released by a newline (see above), and not by the source ending
+      // either — the destination is right there in the text.
+      return const _InlineLinkScan.incompleteDestination();
     }
 
     final String raw = text.substring(closeBracket + 2, closeParen).trim();
@@ -212,7 +222,7 @@ _InlineLinkScan _scanInlineLinkAt(
   if (closeBracket + 1 < text.length && text[closeBracket + 1] == '[') {
     final int closeRef = text.indexOf(']', closeBracket + 2);
     if (closeRef == -1) {
-      return text.contains('\n', closeBracket) || sourceComplete
+      return sourceComplete
           ? const _InlineLinkScan.notALink()
           : const _InlineLinkScan.incompleteDestination();
     }

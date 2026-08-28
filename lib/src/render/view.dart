@@ -181,7 +181,11 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     bool allowIncompleteInlineSyntax = false,
     bool withholdIncompleteDestinations = false,
     bool suppressRawHtml = false,
-    bool sourceComplete = false,
+    // Defaults to true here and false on the streaming constructor: this one
+    // is handed a whole document at once, so there is no later chunk that
+    // could close an open construct and streaming semantics would hold back
+    // the end of a finished text for good.
+    bool sourceComplete = true,
     Duration tokenStaggerDelay = Duration.zero,
     VoidCallback? onTokenDelay,
     VoidCallback? onTokenAnimationEnd,

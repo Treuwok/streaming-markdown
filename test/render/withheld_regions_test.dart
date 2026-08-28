@@ -127,6 +127,24 @@ void main() {
           isNot(contains('secret.example')));
     });
 
+    test('a newline never releases a destination mid-stream', () {
+      // Three bugs, one cause: this scanner and the renderer are handed
+      // DIFFERENT strings, so "a newline already ended this" fired on one side
+      // and not the other. A block's raw slice keeps the trailing newline its
+      // rendered content drops; a list item's raw keeps the continuation break
+      // its joined content drops.
+      for (final String source in <String>[
+        'see [x](https://secret.example\n',
+        '- see [help\n  ](https://secret.example',
+      ]) {
+        final WithheldMarkdownRegions regions =
+            analyzeWithheldMarkdownRegions(source);
+        expect(source.substring(0, regions.safeEndCodeUnits),
+            isNot(contains('secret.example')),
+            reason: source);
+      }
+    });
+
     test('leaves a fenced code block alone', () {
       // Over-hiding is the failure a leak test cannot see: a code fence is
       // deliberately showing its contents, including syntax that would be
