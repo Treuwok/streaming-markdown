@@ -155,10 +155,17 @@ void main() {
       expect(analyzeWithheldMarkdownRegions(resolved).safeEndCodeUnits,
           resolved.length);
 
+      // A closed reference form carries no destination — the URL lives in the
+      // definition block — so it shows as the author's text and a definition
+      // arriving later upgrades it. Only an OPEN candidate is held back, where
+      // a late `](` would retract a label that was already painted.
       const String unresolved = 'see [help][ref]';
       expect(analyzeWithheldMarkdownRegions(unresolved).safeEndCodeUnits,
-          unresolved.indexOf('['),
-          reason: 'the definition may still be in flight');
+          unresolved.length);
+
+      const String open = 'see [help';
+      expect(analyzeWithheldMarkdownRegions(open).safeEndCodeUnits,
+          open.indexOf('['));
     });
   });
 
@@ -187,7 +194,7 @@ void main() {
     // the grammar used to cause.
     const List<String> fixtures = <String>[
       'see [help](https://secret.example',
-      'see [help][undefined-ref]',
+      'see [foo `]` bar](https://secret.example)',
       'see <a href="https://secret.example',
       'a <a href="https://x.example">b</a> c',
       'see [help](https://ok.example) after',

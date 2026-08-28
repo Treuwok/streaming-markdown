@@ -152,20 +152,13 @@ _InlineLinkScan _scanInlineLinkAt(
     return const _InlineLinkScan.notALink();
   }
 
-  // A release once the source is final is only safe while no destination is
-  // in reach. `[foo `]` bar](https://…` reaches its first `]` inside a code
-  // span, so the naive reading is "not a link" — and releasing that reading
-  // paints the `](…)` that follows, destination and all.
-  final bool canSettleAsProse =
-      sourceComplete && !text.contains('](', start);
-
   final int closeBracket = text.indexOf(']', start + 1);
   if (closeBracket == -1) {
     // An unclosed label is only a pending link while more source may follow;
     // a newline ends the inline context, and so does the end of the source.
     // Nothing that could be a destination has appeared yet, so releasing it
     // shows the author's own text — holding it back would hide prose.
-    return text.contains('\n', start) || canSettleAsProse
+    return text.contains('\n', start) || sourceComplete
         ? const _InlineLinkScan.notALink()
         : const _InlineLinkScan.incompleteDestination();
   }
@@ -173,6 +166,12 @@ _InlineLinkScan _scanInlineLinkAt(
   final String label = text.substring(start + 1, closeBracket);
   if (label.isEmpty) {
     return const _InlineLinkScan.notALink();
+  }
+  if (_hasUnmatchedBacktick(label)) {
+    // `[foo `]` bar](https://…` — this `]` is inside a code span, so it is not
+    // where the label ends. Any reading built on it is short, and painting the
+    // difference paints the `](…)` that really follows.
+    return const _InlineLinkScan.incompleteDestination();
   }
 
   if (closeBracket + 1 < text.length && text[closeBracket + 1] == '(') {
@@ -205,7 +204,7 @@ _InlineLinkScan _scanInlineLinkAt(
   if (closeBracket + 1 < text.length && text[closeBracket + 1] == '[') {
     final int closeRef = text.indexOf(']', closeBracket + 2);
     if (closeRef == -1) {
-      return text.contains('\n', closeBracket) || canSettleAsProse
+      return text.contains('\n', closeBracket) || sourceComplete
           ? const _InlineLinkScan.notALink()
           : const _InlineLinkScan.incompleteDestination();
     }
@@ -215,13 +214,13 @@ _InlineLinkScan _scanInlineLinkAt(
     );
     final String? url = references[key];
     if (url == null) {
-      // The definition may still arrive later in the stream. Until it does,
-      // the label is a reference whose destination is unknown — not text.
-      // Once the source is final it never will, and no destination text is
-      // present to leak, so it settles as the prose it turned out to be.
-      return canSettleAsProse
-          ? const _InlineLinkScan.notALink()
-          : const _InlineLinkScan.incompleteDestination();
+      // A complete reference form with no definition yet. Nothing here is a
+      // destination — the URL lives in the definition, which is a block of its
+      // own — so this is the author's text and it shows. A definition arriving
+      // later upgrades it to a link; that rebuild is expected, unlike the one
+      // a late `](` would cause, which is why an OPEN candidate is held back
+      // and a closed one is not.
+      return const _InlineLinkScan.notALink();
     }
     return _InlineLinkScan.matched(
       _InlineLinkMatch(label: label, url: url, end: closeRef + 1),
@@ -239,12 +238,9 @@ _InlineLinkScan _scanInlineLinkAt(
     );
   }
 
-  // `[label]` with no definition anywhere. Shortcut references resolve late
-  // in a stream, so while it is still growing this is a destination that has
-  // not arrived; once it is final, it is prose.
-  return canSettleAsProse
-      ? const _InlineLinkScan.notALink()
-      : const _InlineLinkScan.incompleteDestination();
+  // `[label]` with no definition anywhere: a closed candidate carrying no
+  // destination. Same reasoning as the explicit reference form above.
+  return const _InlineLinkScan.notALink();
 }
 
 /// What an angle-bracket construct turned out to be, and where it ends.
@@ -365,4 +361,18 @@ bool _isHtmlTagNameTerminator(int unit) {
       unit == 9 ||
       unit == 10 ||
       unit == 13;
+}
+
+/// Whether [label] contains an odd number of backticks.
+///
+/// An odd count means a code span opened inside the label and has not closed,
+/// so the `]` that ended this reading is code content, not the label's end.
+bool _hasUnmatchedBacktick(String label) {
+  int count = 0;
+  for (int i = 0; i < label.length; i++) {
+    if (label.codeUnitAt(i) == 96 /* ` */) {
+      count += 1;
+    }
+  }
+  return count.isOdd;
 }
