@@ -118,6 +118,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     bool showTokenDebugColors = false,
     bool showCodeBlockCopyButton = false,
     bool enableSelection = false,
+    bool ownsSelectionArea = true,
     SelectionStrategy selectionStrategy = SelectionStrategy.rich,
     StreamingMarkdownThemeData theme = const StreamingMarkdownThemeData(),
     AnimatedMarkdownBlockBuilder? blockBuilder,
@@ -140,6 +141,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
           debugTokenHighlight: showTokenDebugColors,
           showCodeBlockCopyButton: showCodeBlockCopyButton,
           enableTextSelection: enableSelection,
+          ownsSelectionArea: ownsSelectionArea,
           selectionStrategy: selectionStrategy,
           markdownTheme: theme,
           customBlockBuilder: blockBuilder,
@@ -180,6 +182,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
     bool showTokenDebugColors = false,
     bool showCodeBlockCopyButton = false,
     bool enableSelection = false,
+    bool ownsSelectionArea = true,
     SelectionStrategy selectionStrategy = SelectionStrategy.rich,
     StreamingMarkdownThemeData theme = const StreamingMarkdownThemeData(),
     AnimatedMarkdownBlockBuilder? blockBuilder,
@@ -212,6 +215,7 @@ class AnimatedStreamingMarkdown extends StreamingMarkdownRenderView {
       showTokenDebugColors: showTokenDebugColors,
       showCodeBlockCopyButton: showCodeBlockCopyButton,
       enableSelection: enableSelection,
+      ownsSelectionArea: ownsSelectionArea,
       selectionStrategy: selectionStrategy,
       theme: theme,
       blockBuilder: blockBuilder,
@@ -260,6 +264,7 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     this.debugTokenHighlight = false,
     this.showCodeBlockCopyButton = false,
     this.enableTextSelection = false,
+    this.ownsSelectionArea = true,
     this.selectionStrategy = SelectionStrategy.rich,
     this.markdownTheme = const StreamingMarkdownThemeData(),
     this.customBlockBuilder,
@@ -330,6 +335,21 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// Dragging near a scroll edge automatically extends selection through the
   /// scrollable viewport, including horizontal Markdown tables.
   final bool enableTextSelection;
+
+  /// Whether this widget builds its own selection region.
+  ///
+  /// Defaults to `true`, which is the historical behaviour: with
+  /// [enableTextSelection] on, the widget both registers its text with the
+  /// ambient [SelectionContainer] **and** wraps itself in a `SelectionArea`.
+  ///
+  /// Set this to `false` when the markdown is rendered inside a
+  /// `SelectionArea` that the host already owns — a chat transcript where one
+  /// drag must run across several messages, for example. The two concerns are
+  /// independent: "does my text take part in selection" is answered by
+  /// [enableTextSelection]; "do I own the region" is answered here. Leaving
+  /// them fused forces the host to choose between unselectable markdown and a
+  /// nested region that breaks the drag at this widget's boundary.
+  final bool ownsSelectionArea;
 
   /// Controls whether copied selections become plain text, raw markdown,
   /// or rich HTML with a plain-text fallback.
@@ -601,7 +621,8 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     final String refsDigest = _linkReferencesDigest(linkReferences);
     final String renderConfigDigest = _renderConfigDigest(context);
     final bool compactSettledTokens = _shouldCompactSettledTokens();
-    final bool selectionEnabled = enableTextSelection && !sliver;
+    final bool selectionEnabled =
+        enableTextSelection && !sliver && ownsSelectionArea;
     final _MarkdownSelectionProjection? selectionProjection = selectionEnabled
         ? _buildSelectionProjection(
             blocks,
