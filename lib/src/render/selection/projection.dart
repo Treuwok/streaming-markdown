@@ -83,13 +83,26 @@ extension _StreamingMarkdownSelectionProjectionBuilder
           );
           break;
         case 'html_block':
-          // Suppressed blocks render nothing, so they contribute nothing to a
-          // selection either — otherwise copying returns markup the screen
-          // never showed.
+          if (suppressRawHtml) {
+            // Selectable is decided by the same scan that decides painted:
+            // this is the ordinary inline path, so whatever survives tag
+            // suppression can be selected and copied, and whatever does not
+            // contributes nothing. Returning empty here regardless was right
+            // only while the block painted nothing at all.
+            segments.add(
+              _inlineSelectionSegment(
+                raw,
+                markdownText: raw,
+                linkReferences: linkReferences,
+                footnoteNumbers: footnoteNumbers,
+              ),
+            );
+            break;
+          }
           segments.add(
             _MarkdownSelectionSegment.plain(
-              plainText: suppressRawHtml ? '' : _htmlBlockSelectionText(raw),
-              markdownText: suppressRawHtml ? '' : raw,
+              plainText: _htmlBlockSelectionText(raw),
+              markdownText: raw,
               preserveBlockMarkdownOnPartial: true,
             ),
           );

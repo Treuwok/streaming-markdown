@@ -71,4 +71,18 @@ void main() {
     expect(painted, isNot(contains('<div>')));
     expect(painted, isNot(contains('</div>')));
   });
+
+  test('the text the tags wrapped can be selected and copied', () {
+    // Painted but not selectable is its own bug: the block used to contribute
+    // an empty range to the selection projection, which was right only while
+    // it painted nothing. Now that the prose is on screen, a selection that
+    // spans it must carry it.
+    final String copied =
+        StreamingMarkdownRenderView.debugMarkdownForSelectedPlainText(
+      nodes: <MarkdownRenderNode>[_htmlBlock(_source)],
+      selectedPlainText: 'Important answer',
+      suppressRawHtml: true,
+    );
+    expect(copied, contains('Important answer'));
+  });
 }
