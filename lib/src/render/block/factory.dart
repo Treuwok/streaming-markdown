@@ -113,10 +113,15 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
         return const SizedBox.shrink();
       case 'html_block':
         if (suppressRawHtml) {
-          // Same rule as everywhere else: hide the tags, keep the text. This
-          // is deliberately the ordinary paragraph path — the inline scan it
-          // runs is the one the analysis runs, with the same flag, so the two
-          // answers cannot disagree about what this block paints.
+          if (_isRawTextHtmlOpening(node.raw)) {
+            // Raw data, not prose — painting it would show a stylesheet or a
+            // script body where the answer should be.
+            return const SizedBox.shrink();
+          }
+          // Otherwise the same rule as everywhere else: hide the tags, keep
+          // the text. This is deliberately the ordinary paragraph path — the
+          // inline scan it runs is the one the analysis runs, with the same
+          // flag, so the two answers cannot disagree about what this paints.
           return _buildParagraphBlock(
             context,
             _paragraphText(node),

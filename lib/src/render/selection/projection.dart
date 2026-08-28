@@ -84,6 +84,17 @@ extension _StreamingMarkdownSelectionProjectionBuilder
           break;
         case 'html_block':
           if (suppressRawHtml) {
+            if (_isRawTextHtmlOpening(raw)) {
+              // Painted nothing, so it contributes nothing to a selection.
+              segments.add(
+                _MarkdownSelectionSegment.plain(
+                  plainText: '',
+                  markdownText: '',
+                  preserveBlockMarkdownOnPartial: true,
+                ),
+              );
+              break;
+            }
             // Selectable is decided by the same scan that decides painted:
             // this is the ordinary inline path, so whatever survives tag
             // suppression can be selected and copied, and whatever does not

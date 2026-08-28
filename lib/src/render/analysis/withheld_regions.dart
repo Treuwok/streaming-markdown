@@ -91,10 +91,17 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     if (_blockHasNoInlineContent(block)) {
       continue;
     }
-    // A block of raw HTML gets no rule of its own. Suppressing raw HTML means
-    // hiding the TAGS, and the inline scan below already does exactly that —
-    // wherever they appear. Treating a whole `html_block` as unpaintable was a
-    // second, coarser copy of that same decision, and it dropped the prose
+    if (suppressRawHtml && _isRawTextHtmlBlock(block, source)) {
+      // Nothing inside these is prose, so the block parser's extent IS the
+      // hidden range — no second scan for where the element ends.
+      hidden.add((block.start, block.end));
+      continue;
+    }
+
+    // Every OTHER block of raw HTML gets no rule of its own. Suppressing raw
+    // HTML means hiding the TAGS, and the inline scan below already does that
+    // wherever they appear. Treating every `html_block` as unpaintable was a
+    // coarser second copy of the same decision, and it dropped the prose
     // between the tags: `<div>\nanswer\n</div>` painted nothing at all.
     final _InlineParser parser = _InlineParser(
       references: references,
@@ -142,6 +149,44 @@ int _firstLoneCarriageReturn(String source) {
     }
   }
   return -1;
+}
+
+/// Whether this block's CONTENT is raw data rather than prose.
+///
+/// CommonMark gives `script`, `style`, `pre` and `textarea` raw-text content,
+/// and a comment is raw throughout. Hiding only their tags would paint a
+/// stylesheet or a script body as if it were the answer.
+///
+/// The test is the block's opening only. Where such an element ENDS — closing
+/// tag, blank line, or end of input — was already decided by the block parser
+/// that produced this node, and re-deriving it here was a hand-written second
+/// answer that disagreed with the first (an unclosed `<script>` at end of
+/// input is the case that separates them).
+bool _isRawTextHtmlBlock(MarkdownBlockNode block, String source) {
+  if (block is! GenericBlockNode || block.type != 'html_block') {
+    return false;
+  }
+  return _isRawTextHtmlOpening(source.substring(block.start, block.end));
+}
+
+/// The same test on a block's raw text, for the two render-side callers.
+bool _isRawTextHtmlOpening(String raw) {
+  final String opening = raw.trimLeft().toLowerCase();
+  if (opening.startsWith('<!--')) {
+    return true;
+  }
+  for (final String name in const <String>['script', 'style', 'pre', 'textarea']) {
+    // `<pre>` and `<pre class=…>` are the element; `<prefix>` is not.
+    final int after = 1 + name.length;
+    if (!opening.startsWith('<$name')) {
+      continue;
+    }
+    if (after >= opening.length ||
+        !_isHtmlTagNameChar(opening.codeUnitAt(after))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /// Blocks whose text is never inline-parsed, so nothing in them can leak.

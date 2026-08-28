@@ -334,46 +334,12 @@ _AngleScan _scanAngleAt(
     return const _AngleScan(_AngleScanKind.notAngleSyntax);
   }
 
-  // CommonMark's raw-HTML grammar is a closed set of six constructs, and all
-  // six have to be recognised here or "do not render raw HTML" leaks the ones
-  // that are missing — verbatim, which is worse than rendering them. The list
-  // below is the spec's, not a guess at what looks HTML-ish; that distinction
-  // is why it is safe to enumerate at all.
-  for (final (String open, String close) delimiters in const <(String, String)>[
-    ('<!--', '-->'), // comment
-    ('<![CDATA[', ']]>'), // CDATA section
-    ('<?', '?>'), // processing instruction
-  ]) {
-    if (!text.startsWith(delimiters.$1, start)) {
-      continue;
-    }
-    final int end =
-        text.indexOf(delimiters.$2, start + delimiters.$1.length);
+  if (text.startsWith('<!--', start)) {
+    final int end = text.indexOf('-->', start + 4);
     if (end != -1) {
-      return _AngleScan(_AngleScanKind.html, end + delimiters.$2.length);
+      return _AngleScan(_AngleScanKind.html, end + 3);
     }
     return _unterminatedAngle(text, start, sourceComplete: sourceComplete);
-  }
-
-  // Declaration (`<!DOCTYPE html>`). `<!` followed by a letter, closed by the
-  // first `>`; CDATA is `<![`, already taken above, so the order matters.
-  if (text.startsWith('<!', start) && _isHtmlTagNameStart(text, start + 2)) {
-    final int end = text.indexOf('>', start + 2);
-    if (end != -1) {
-      return _AngleScan(_AngleScanKind.html, end + 1);
-    }
-    return _unterminatedAngle(text, start, sourceComplete: sourceComplete);
-  }
-
-  // Elements whose CONTENT is raw text, not markup: hiding only their tags
-  // would paint a stylesheet or a script body as if it were the answer. The
-  // hidden run therefore reaches the matching close tag.
-  final int? literalEnd =
-      _scanLiteralContentElementAt(text, start, sourceComplete: sourceComplete);
-  if (literalEnd != null) {
-    return literalEnd == -1
-        ? _unterminatedAngle(text, start, sourceComplete: sourceComplete)
-        : _AngleScan(_AngleScanKind.html, literalEnd);
   }
 
   final int nameStart = text.startsWith('</', start) ? start + 2 : start + 1;
@@ -468,68 +434,6 @@ _AngleScan _unterminatedAngle(
   }
   return const _AngleScan(_AngleScanKind.notAngleSyntax);
 }
-
-/// End of a raw-text element (`<script>`, `<style>`, `<pre>`, `<textarea>`)
-/// beginning at [start], `-1` if it has not closed yet, or null if there is no
-/// such element here.
-///
-/// CommonMark gives these four elements raw-text content. Everything between
-/// the tags is data, so the whole run is one hidden construct rather than two
-/// tags with prose between them.
-int? _scanLiteralContentElementAt(
-  String text,
-  int start, {
-  required bool sourceComplete,
-}) {
-  for (final String name in const <String>[
-    'script',
-    'textarea',
-    'style',
-    'pre',
-  ]) {
-    final int nameEnd = start + 1 + name.length;
-    if (!_startsWithIgnoreAsciiCase(text, '<$name', start)) {
-      continue;
-    }
-    // `<pre>` and `<pre class=…>` are the element; `<prefix>` is not.
-    if (nameEnd < text.length &&
-        !_isHtmlTagNameTerminator(text.codeUnitAt(nameEnd))) {
-      continue;
-    }
-    final int close = _indexOfIgnoreAsciiCase(text, '</$name', nameEnd);
-    if (close == -1) {
-      return -1;
-    }
-    final int end = text.indexOf('>', close);
-    return end == -1 ? -1 : end + 1;
-  }
-  return null;
-}
-
-bool _startsWithIgnoreAsciiCase(String text, String needle, int start) {
-  if (start + needle.length > text.length) {
-    return false;
-  }
-  for (int i = 0; i < needle.length; i++) {
-    if (_toLowerAscii(text.codeUnitAt(start + i)) !=
-        _toLowerAscii(needle.codeUnitAt(i))) {
-      return false;
-    }
-  }
-  return true;
-}
-
-int _indexOfIgnoreAsciiCase(String text, String needle, int from) {
-  for (int i = from; i + needle.length <= text.length; i++) {
-    if (_startsWithIgnoreAsciiCase(text, needle, i)) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-int _toLowerAscii(int unit) =>
-    (unit >= 65 && unit <= 90) ? unit + 32 : unit;
 
 bool _isHtmlTagNameStart(String text, int index) {
   if (index >= text.length) {
