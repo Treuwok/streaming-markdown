@@ -7,17 +7,7 @@ extension _StreamingMarkdownReferenceParsing on StreamingMarkdownRenderView {
       if (node.type != 'link_reference_definition') {
         continue;
       }
-      final String raw = _normalizedRaw(node.raw);
-      for (final RegExpMatch match in RegExp(
-        r'^\s*\[([^\]]+)\]:\s*(\S+)',
-        multiLine: true,
-      ).allMatches(raw)) {
-        final String name = _normalizeReferenceKey(match.group(1)!);
-        final String url = _stripEnclosingAngles(match.group(2)!);
-        if (name.isNotEmpty && url.isNotEmpty) {
-          references[name] = url;
-        }
-      }
+      _addLinkReferencesFromRaw(node.raw, references);
     }
     return references;
   }
@@ -35,5 +25,24 @@ extension _StreamingMarkdownReferenceParsing on StreamingMarkdownRenderView {
       }
     }
     return numbers;
+  }
+}
+
+/// Reads `[name]: url` definitions out of one block's raw text.
+///
+/// Shared so the renderer and the withheld-region analysis resolve reference
+/// links against the same definitions; a reference whose definition has not
+/// arrived is an unresolved destination, and both have to agree on that.
+void _addLinkReferencesFromRaw(String raw, Map<String, String> into) {
+  final String normalized = raw.replaceAll('\r', '').trimRight();
+  for (final RegExpMatch match in RegExp(
+    r'^\s*\[([^\]]+)\]:\s*(\S+)',
+    multiLine: true,
+  ).allMatches(normalized)) {
+    final String name = _normalizeReferenceKey(match.group(1)!);
+    final String url = _stripEnclosingAngles(match.group(2)!);
+    if (name.isNotEmpty && url.isNotEmpty) {
+      into[name] = url;
+    }
   }
 }

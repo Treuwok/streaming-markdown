@@ -39,6 +39,9 @@ import 'selection/web_copy_interceptor_stub.dart'
 import '../copy/clipboard_handler.dart';
 import '../copy/selection_strategy.dart';
 import '../model/render_node.dart';
+import '../model/block_nodes.dart';
+import '../model/rope.dart';
+import '../parser/rope_markdown_parser.dart';
 import '../worker/parse_worker_stub.dart'
     if (dart.library.ffi) '../worker/parse_worker.dart';
 
@@ -47,6 +50,7 @@ part 'text/blocks.dart';
 part 'text/tables.dart';
 part 'text/refs.dart';
 part 'text/parser.dart';
+part 'analysis/withheld_regions.dart';
 part 'text/inline.dart';
 part 'text/delims.dart';
 part 'text/content.dart';
