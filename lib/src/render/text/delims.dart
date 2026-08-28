@@ -152,13 +152,20 @@ _InlineLinkScan _scanInlineLinkAt(
     return const _InlineLinkScan.notALink();
   }
 
+  // A release once the source is final is only safe while no destination is
+  // in reach. `[foo `]` bar](https://…` reaches its first `]` inside a code
+  // span, so the naive reading is "not a link" — and releasing that reading
+  // paints the `](…)` that follows, destination and all.
+  final bool canSettleAsProse =
+      sourceComplete && !text.contains('](', start);
+
   final int closeBracket = text.indexOf(']', start + 1);
   if (closeBracket == -1) {
     // An unclosed label is only a pending link while more source may follow;
     // a newline ends the inline context, and so does the end of the source.
     // Nothing that could be a destination has appeared yet, so releasing it
     // shows the author's own text — holding it back would hide prose.
-    return text.contains('\n', start) || sourceComplete
+    return text.contains('\n', start) || canSettleAsProse
         ? const _InlineLinkScan.notALink()
         : const _InlineLinkScan.incompleteDestination();
   }
@@ -182,6 +189,13 @@ _InlineLinkScan _scanInlineLinkAt(
     if (raw.isEmpty) {
       return const _InlineLinkScan.notALink();
     }
+    if (raw.startsWith('<') && !raw.contains('>')) {
+      // `[label](<https://…/a)secret>)` — the `)` that closed the scan is
+      // inside an angle-bracketed destination, so the destination really runs
+      // past it. Treating the short reading as a match would paint the rest of
+      // the destination as ordinary text.
+      return const _InlineLinkScan.incompleteDestination();
+    }
     final String url = _stripEnclosingAngles(raw.split(RegExp(r'\s+')).first);
     return _InlineLinkScan.matched(
       _InlineLinkMatch(label: label, url: url, end: closeParen + 1),
@@ -191,7 +205,7 @@ _InlineLinkScan _scanInlineLinkAt(
   if (closeBracket + 1 < text.length && text[closeBracket + 1] == '[') {
     final int closeRef = text.indexOf(']', closeBracket + 2);
     if (closeRef == -1) {
-      return text.contains('\n', closeBracket) || sourceComplete
+      return text.contains('\n', closeBracket) || canSettleAsProse
           ? const _InlineLinkScan.notALink()
           : const _InlineLinkScan.incompleteDestination();
     }
@@ -205,7 +219,7 @@ _InlineLinkScan _scanInlineLinkAt(
       // the label is a reference whose destination is unknown — not text.
       // Once the source is final it never will, and no destination text is
       // present to leak, so it settles as the prose it turned out to be.
-      return sourceComplete
+      return canSettleAsProse
           ? const _InlineLinkScan.notALink()
           : const _InlineLinkScan.incompleteDestination();
     }
@@ -228,7 +242,7 @@ _InlineLinkScan _scanInlineLinkAt(
   // `[label]` with no definition anywhere. Shortcut references resolve late
   // in a stream, so while it is still growing this is a destination that has
   // not arrived; once it is final, it is prose.
-  return sourceComplete
+  return canSettleAsProse
       ? const _InlineLinkScan.notALink()
       : const _InlineLinkScan.incompleteDestination();
 }
