@@ -113,10 +113,16 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
         return const SizedBox.shrink();
       case 'html_block':
         if (suppressRawHtml) {
-          // The analysis reports this block's whole range as painting nothing;
-          // rendering it here would make the two answers contradict each other,
-          // and the reveal cursor believes the analysis.
-          return const SizedBox.shrink();
+          // Same rule as everywhere else: hide the tags, keep the text. This
+          // is deliberately the ordinary paragraph path — the inline scan it
+          // runs is the one the analysis runs, with the same flag, so the two
+          // answers cannot disagree about what this block paints.
+          return _buildParagraphBlock(
+            context,
+            _paragraphText(node),
+            linkReferences: linkReferences,
+            footnoteNumbers: footnoteNumbers,
+          );
         }
         return _HtmlBlockCard(
           html: _normalizedRaw(node.raw),

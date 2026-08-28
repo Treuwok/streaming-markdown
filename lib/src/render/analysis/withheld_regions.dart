@@ -91,13 +91,11 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     if (_blockHasNoInlineContent(block)) {
       continue;
     }
-    if (suppressRawHtml && _isRawHtmlBlock(block)) {
-      // A whole block of raw HTML paints nothing, so all of it is hidden —
-      // and its coordinates matter for the same reason an inline tag's do.
-      hidden.add((block.start, block.end));
-      continue;
-    }
-
+    // A block of raw HTML gets no rule of its own. Suppressing raw HTML means
+    // hiding the TAGS, and the inline scan below already does exactly that —
+    // wherever they appear. Treating a whole `html_block` as unpaintable was a
+    // second, coarser copy of that same decision, and it dropped the prose
+    // between the tags: `<div>\nanswer\n</div>` painted nothing at all.
     final _InlineParser parser = _InlineParser(
       references: references,
       withholdIncompleteDestinations: withholdIncompleteDestinations,
@@ -159,6 +157,3 @@ bool _blockHasNoInlineContent(MarkdownBlockNode block) {
           block.type == 'front_matter' ||
           block.type == 'link_reference_definition');
 }
-
-bool _isRawHtmlBlock(MarkdownBlockNode block) =>
-    block is GenericBlockNode && block.type == 'html_block';
