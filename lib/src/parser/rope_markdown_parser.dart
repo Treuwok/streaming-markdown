@@ -323,6 +323,10 @@ class RopeMarkdownParser {
     return true;
   }
 
+  /// Whether [text] is indented enough to continue the list item above it.
+  static bool _isIndentedContinuation(String text) =>
+      text.startsWith('  ') || text.startsWith('\t');
+
   _ListItemMatch? _parseListItem(String text) {
     final RegExpMatch? unordered = RegExp(
       r'^\s*([-*+])\s+(.+)$',
@@ -351,10 +355,28 @@ class RopeMarkdownParser {
         break;
       }
 
-      items.add(
-        ListItemNode(start: lines[i].start, end: lines[i].end, text: item.text),
-      );
+      final int itemStart = lines[i].start;
+      final StringBuffer itemText = StringBuffer(item.text);
+      int itemEnd = lines[i].end;
       i++;
+
+      // A continuation line belongs to the item above it. The renderer folds
+      // it in with a space; ending the list here instead left the analysis
+      // seeing a separate paragraph, so `- first\n  second` was reported as
+      // two lines while the screen paints one.
+      while (i < lines.length &&
+          !_isBlank(lines[i].text) &&
+          _parseListItem(lines[i].text) == null &&
+          _isIndentedContinuation(lines[i].text)) {
+        itemText.write('\n');
+        itemText.write(lines[i].text.trim());
+        itemEnd = lines[i].end;
+        i++;
+      }
+
+      items.add(
+        ListItemNode(start: itemStart, end: itemEnd, text: itemText.toString()),
+      );
     }
 
     final int end = items.isEmpty ? lines[startIndex].end : items.last.end;

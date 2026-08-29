@@ -128,7 +128,22 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   // remainder of such a message; a lone CR does not occur in the content this
   // is built for, and over-hiding is the direction that cannot leak.
   final int loneCarriageReturn = _firstLoneCarriageReturn(source);
-  final RopeString rope = RopeString()..append(source);
+  // Parse only as far as the analysis is willing to speak for.
+  //
+  // The boundary is known BEFORE parsing, and parsing past it bought nothing
+  // but trouble: a block spanning the CR went on projecting its whole
+  // remainder, and clipping the result afterwards needed the run's source
+  // extent — which generated text does not have, because it reports one
+  // position for its whole run. Two rounds of review went into carrying that
+  // extent alongside the ledger, and it grew a tax each time: keeping it in
+  // step with edge-trimming, then needing a finer granularity than the piece.
+  //
+  // Truncating removes the question. Nothing downstream can produce text from
+  // past the boundary, because it never sees any.
+  final String analyzed = loneCarriageReturn == -1
+      ? source
+      : source.substring(0, loneCarriageReturn);
+  final RopeString rope = RopeString()..append(analyzed);
   final MarkdownDocument document = const RopeMarkdownParser().parse(rope);
 
   // Definitions first: a reference link whose definition has not arrived is an
@@ -167,23 +182,6 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   final List<(int, int)> hidden = <(int, int)>[];
   final List<int> visibleUnits = <int>[];
   final List<int> visibleOffsets = <int>[];
-
-  // How far into the source each unit's own run reaches.
-  //
-  // The offset alone cannot clip the ledger at the safety boundary. Generated
-  // text — a formula's expression, a definition's label — reports ONE position
-  // for its whole run, so `$$x\ry$$` maps both `x` and `y` to offset 0 while
-  // `y` came from source past the boundary. An offset-only cut keeps it.
-  //
-  // A run that knows its own positions bounds itself: its last offset is the
-  // furthest source it can have come from. A GENERATED run knows nothing, so
-  // it falls back to the extent of the block it sits in — coarse, and coarse
-  // in the safe direction.
-  //
-  // Per RUN, not per block: a list is one block, and the second item holding
-  // an unfinished destination must not take the first item down with it.
-  int currentRunEnd = 0;
-  final List<int> visibleRunEnds = <int>[];
 
   int safeEnd = loneCarriageReturn == -1 ? source.length : loneCarriageReturn;
 
@@ -241,8 +239,6 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       visibleUnits.add(10);
       final int after = visibleOffsets.last + 1;
       visibleOffsets.add(after < nextOffset ? after : nextOffset);
-      visibleRunEnds.add(
-          visibleRunEnds.isEmpty ? currentRunEnd : visibleRunEnds.last);
     }
     blockStart = visibleUnits.length;
   }
@@ -263,7 +259,6 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     flushSeparator(sourceOffset);
     visibleUnits.add(unit);
     visibleOffsets.add(sourceOffset);
-    visibleRunEnds.add(currentRunEnd);
   }
 
   void addSlice(_SourceSlice slice) {
@@ -273,8 +268,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   }
 
   for (final MarkdownBlockNode block in document.blocks) {
-    final String blockRaw = source.substring(block.start, block.end);
-    currentRunEnd = block.end;
+    final String blockRaw = analyzed.substring(block.start, block.end);
 
     if (hideLinkReferenceDefinitions &&
         block is GenericBlockNode &&
@@ -311,9 +305,6 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
             .projection;
     for (final _ProjectedPiece projected in projection.pieces) {
       final _SourceSlice inline = _rebase(projected.slice, block.start);
-      // A located run bounds itself; a generated one has to borrow the block's.
-      currentRunEnd =
-          inline.located && inline.sourceEnd >= 0 ? inline.sourceEnd : block.end;
       void beginPiece() {
         if (!projected.continuesLine) {
           separateBlocks();
@@ -442,7 +433,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   // does not get to decide it.
   int ledgerEnd = visibleUnits.length;
   for (int i = 0; i < visibleOffsets.length; i++) {
-    if (visibleOffsets[i] >= safeEnd || visibleRunEnds[i] > safeEnd) {
+    if (visibleOffsets[i] >= safeEnd) {
       ledgerEnd = i;
       break;
     }

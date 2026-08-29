@@ -303,9 +303,14 @@ void main() {
     // The joining space IS the line break it replaced, so the item stays
     // traceable end to end. A position-less space used to cost the whole item
     // every hidden range in it.
+    //
+    // One line, not two: the renderer folds a continuation into the item above
+    // it. This expected `first\nx` while the screen painted `first x`, because
+    // the block parser used to end the list at the continuation and the
+    // analysis saw a separate paragraph.
     const String source = '- first\n  <a href="https://secret.example">x</a>';
     final WithheldMarkdownRegions r = _scan(source);
-    expect(r.visibleText, 'first\nx');
+    expect(r.visibleText, 'first x');
     expect(
       r.hiddenCodeUnitRanges
           .map(((int, int) g) => source.substring(g.$1, g.$2))

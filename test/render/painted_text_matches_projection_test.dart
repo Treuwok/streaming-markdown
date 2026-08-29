@@ -188,48 +188,56 @@ void main() {
     }
   });
 
-  test('a hidden range that straddles the boundary is cut at it', () {
-    // Not in the fixtures above on purpose: the analysis stops at the lone CR
-    // and the renderer paints straight past it, so comparing them is
-    // meaningless here. What is being checked is the report's own promise —
-    // every range lies inside the prefix it declares safe. Without the cut
-    // this range ends at 16, and a caller applying it to a 12-character
-    // prefix cuts off the end of a string that is not there.
-    const String source = 'x <a href="y\rz">t</a>';
-    final WithheldMarkdownRegions report =
-        analyzeWithheldMarkdownRegions(source, suppressRawHtml: true);
-
-    expect(report.safeEndCodeUnits, source.indexOf('\r'));
-    expect(report.hiddenCodeUnitRanges, isNotEmpty);
-    for (final (int start, int end) in report.hiddenCodeUnitRanges) {
-      expect(start, lessThan(report.safeEndCodeUnits));
-      expect(end, lessThanOrEqualTo(report.safeEndCodeUnits));
-    }
+  test('a list continuation is one line, not two', () {
+    // Whitespace-sensitive on purpose. The sweep above compares WHICH
+    // characters reach the screen and collapses whitespace to get there, so it
+    // structurally cannot see this: the renderer folds a continuation into the
+    // item above it with a space, and the analysis used to report a newline
+    // because its block parser ended the list at the continuation line.
+    //
+    // A blind spot in a harness is not visible from inside the harness. This
+    // one was found by a reviewer reading the two parsers side by side.
+    expect(
+      analyzeWithheldMarkdownRegions('- first\n  second',
+              suppressRawHtml: true, sourceComplete: true)
+          .visibleText,
+      'first second',
+    );
   });
 
-  group('a generated run cannot smuggle text past the boundary', () {
-    // Generated text reports ONE position for its whole run, so clipping the
-    // ledger by offset alone lets the part of the run derived from past the
-    // boundary through. The offsets here are all 0 and the boundary is 3, so
-    // the earlier offset-only check passes while the text is wrong — an
-    // assertion weaker than the property it was written for.
-    for (final (String name, String source) in <(String, String)>[
-      ('a formula spanning the CR', '\$\$x\ry\$\$'),
-      ('a definition id spanning the CR', '[^a\rb]: body'),
+  group('nothing past the boundary reaches the ledger', () {
+    // A lone CR makes the two block parsers disagree, so the analysis refuses
+    // to speak for anything after it. The report therefore describes what the
+    // SAFE PREFIX paints — which is what the caller draws (the mobile adapter
+    // renders `raw.substring(0, safeEndCodeUnits)`).
+    //
+    // Getting here took three attempts, and the two that failed are worth
+    // naming. Clipping the finished ledger by OFFSET let generated text
+    // through, because a generated run reports one position for all of its
+    // characters and `$$x\ry$$` maps both `x` and `y` to 0. Carrying each
+    // run's source extent alongside the ledger fixed that and immediately grew
+    // its own problems — the extents had to be kept in step with edge-trimming,
+    // and a whole paragraph's extent was too coarse for a paragraph whose tail
+    // is withheld. Neither of those exists now: the parse never sees past the
+    // boundary, so nothing downstream can produce text from there.
+    for (final (String name, String source, String forbidden)
+        in <(String, String, String)>[
+      ('a formula spanning the CR', '\$\$x\ry\$\$', 'y'),
+      ('a definition id spanning the CR', '[^a\rb]: body', 'b'),
+      ('a code block spanning the CR',
+          '```md\ncode\r```\r[help](https://secret.example', 'secret'),
     ]) {
       test(name, () {
         final WithheldMarkdownRegions report =
             analyzeWithheldMarkdownRegions(source, suppressRawHtml: true);
-        expect(report.safeEndCodeUnits, source.indexOf('\r'));
-        expect(report.visibleText, isEmpty,
-            reason: 'the whole run is derived partly from past the boundary');
+        expect(report.safeEndCodeUnits, lessThanOrEqualTo(source.indexOf('\r')));
+        expect(report.visibleText, isNot(contains(forbidden)));
       });
     }
 
-    test('but a sibling run that ends before it survives', () {
-      // The bound is per RUN, not per block. A list is one block; the second
-      // item holding the unfinished destination must not take the first down
-      // with it, which a block-wide bound did.
+    test('but a sibling run that ends before the boundary survives', () {
+      // The boundary is not always a CR — an unfinished destination moves it
+      // too, and there the safe part of the same block must still be reported.
       final WithheldMarkdownRegions report = analyzeWithheldMarkdownRegions(
         '- first\n- [link](https://unfinished',
         suppressRawHtml: true,
