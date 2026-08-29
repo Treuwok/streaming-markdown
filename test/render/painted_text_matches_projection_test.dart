@@ -149,6 +149,17 @@ void main() {
     ('an escaped pipe survives in a cell',
         '| a \\| b |\n| --- | --- |\n| c | d |'),
 
+    // ---- a lone CR, which used to stop the scan dead ----
+    // CommonMark calls a lone CR a line ending and the block parser does not,
+    // so the analysis used to refuse to speak past the first one: it ran its
+    // OWN parser, and the two could not be made to agree. It reads the
+    // renderer's blocks now, so there is no second reading to disagree with —
+    // and these say so the only way that settles it, by asking the screen.
+    ('a formula spanning a lone CR', '\$\$x\ry\$\$'),
+    ('a definition id spanning a lone CR', '[^a\rb]: body'),
+    ('an unfinished destination after a lone CR',
+        '```md\ncode\r```\r[help](https://secret.example'),
+
     // ---- ordinary prose, as the control ----
     ('headings and paragraphs', '# Title\n\nsome **bold** prose'),
     ('a paragraph folds its line breaks', 'first line\nsecond line'),
@@ -161,8 +172,12 @@ void main() {
       await tester.pumpWidget(_host(blocks));
       await tester.pump();
 
+      // THE SAME list, to both. That is the whole assertion behind this file
+      // now: the widget and the report are not two readings of one string,
+      // they are one reading used twice.
       final WithheldMarkdownRegions report = analyzeWithheldMarkdownRegions(
         source,
+        blocks: blocks,
         suppressRawHtml: true,
         sourceComplete: true,
       );
@@ -171,22 +186,6 @@ void main() {
           reason: 'source: ${source.split('\n').join(r'\n')}');
     });
   }
-
-  test('a lone CR stops the ledger, not just the boundary', () {
-    // The two block parsers read a lone CR differently, so the analysis
-    // refuses to guess and stops there. The code block spanning that CR went
-    // on projecting its whole remainder anyway, and the destination after it
-    // reached `visibleText` with offsets 33 past `safeEndCodeUnits`.
-    const String source = '```md\ncode\r```\r[help](https://secret.example';
-    final WithheldMarkdownRegions report =
-        analyzeWithheldMarkdownRegions(source, suppressRawHtml: true);
-
-    expect(report.safeEndCodeUnits, source.indexOf('\r'));
-    expect(report.visibleText, isNot(contains('secret.example')));
-    for (final int offset in report.visibleSourceOffsets) {
-      expect(offset, lessThan(report.safeEndCodeUnits));
-    }
-  });
 
   group('a raw-text element reports nothing, all four of them', () {
     // `script`, `style` and `pre` were suppressed; `textarea` was not, and
@@ -205,7 +204,7 @@ void main() {
     ]) {
       test(name, () {
         expect(
-          analyzeWithheldMarkdownRegions(source,
+          analyzeWithheldMarkdownRegionsOfSource(source,
                   suppressRawHtml: true, sourceComplete: true)
               .visibleText,
           isEmpty,
@@ -224,52 +223,27 @@ void main() {
     // A blind spot in a harness is not visible from inside the harness. This
     // one was found by a reviewer reading the two parsers side by side.
     expect(
-      analyzeWithheldMarkdownRegions('- first\n  second',
+      analyzeWithheldMarkdownRegionsOfSource('- first\n  second',
               suppressRawHtml: true, sourceComplete: true)
           .visibleText,
       'first second',
     );
   });
 
-  group('nothing past the boundary reaches the ledger', () {
-    // A lone CR makes the two block parsers disagree, so the analysis refuses
-    // to speak for anything after it. The report therefore describes what the
-    // SAFE PREFIX paints — which is what the caller draws (the mobile adapter
-    // renders `raw.substring(0, safeEndCodeUnits)`).
-    //
-    // Getting here took three attempts, and the two that failed are worth
-    // naming. Clipping the finished ledger by OFFSET let generated text
-    // through, because a generated run reports one position for all of its
-    // characters and `$$x\ry$$` maps both `x` and `y` to 0. Carrying each
-    // run's source extent alongside the ledger fixed that and immediately grew
-    // its own problems — the extents had to be kept in step with edge-trimming,
-    // and a whole paragraph's extent was too coarse for a paragraph whose tail
-    // is withheld. Neither of those exists now: the parse never sees past the
-    // boundary, so nothing downstream can produce text from there.
-    for (final (String name, String source, String forbidden)
-        in <(String, String, String)>[
-      ('a formula spanning the CR', '\$\$x\ry\$\$', 'y'),
-      ('a definition id spanning the CR', '[^a\rb]: body', 'b'),
-      ('a code block spanning the CR',
-          '```md\ncode\r```\r[help](https://secret.example', 'secret'),
-    ]) {
-      test(name, () {
-        final WithheldMarkdownRegions report =
-            analyzeWithheldMarkdownRegions(source, suppressRawHtml: true);
-        expect(report.safeEndCodeUnits, lessThanOrEqualTo(source.indexOf('\r')));
-        expect(report.visibleText, isNot(contains(forbidden)));
-      });
-    }
-
-    test('but a sibling run that ends before the boundary survives', () {
-      // The boundary is not always a CR — an unfinished destination moves it
-      // too, and there the safe part of the same block must still be reported.
-      final WithheldMarkdownRegions report = analyzeWithheldMarkdownRegions(
-        '- first\n- [link](https://unfinished',
-        suppressRawHtml: true,
-      );
-      expect(report.visibleText, 'first');
-    });
+  test('a run that ends before the boundary survives', () {
+    // The boundary is set by an unfinished destination, and the safe part of
+    // the same block must still be reported. Getting this right took three
+    // attempts and the two that failed are worth naming, because both were
+    // machinery this change removed: clipping the finished ledger by OFFSET
+    // let generated text through (a generated run reports one position for all
+    // its characters), and carrying each run's source extent alongside the
+    // ledger to fix that grew a tax of its own every round.
+    final WithheldMarkdownRegions report =
+        analyzeWithheldMarkdownRegionsOfSource(
+      '- first\n- [link](https://unfinished',
+      suppressRawHtml: true,
+    );
+    expect(report.visibleText, 'first');
   });
 
   testWidgets('every reported character still points at itself', (
@@ -279,7 +253,7 @@ void main() {
     // reveal cursor cut in the wrong place, and the comparison above cannot
     // see that.
     for (final (String _, String source) in fixtures) {
-      final WithheldMarkdownRegions report = analyzeWithheldMarkdownRegions(
+      final WithheldMarkdownRegions report = analyzeWithheldMarkdownRegionsOfSource(
         source,
         suppressRawHtml: true,
         sourceComplete: true,

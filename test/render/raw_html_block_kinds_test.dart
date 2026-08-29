@@ -14,7 +14,7 @@ import 'package:animated_streaming_markdown/animated_streaming_markdown.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 String _hidden(String source) {
-  final WithheldMarkdownRegions regions = analyzeWithheldMarkdownRegions(
+  final WithheldMarkdownRegions regions = analyzeWithheldMarkdownRegionsOfSource(
     source,
     suppressRawHtml: true,
     sourceComplete: true,

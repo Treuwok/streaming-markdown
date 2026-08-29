@@ -11,7 +11,7 @@ library;
 import 'package:animated_streaming_markdown/animated_streaming_markdown.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-WithheldMarkdownRegions _scan(String source) => analyzeWithheldMarkdownRegions(
+WithheldMarkdownRegions _scan(String source) => analyzeWithheldMarkdownRegionsOfSource(
       source,
       suppressRawHtml: true,
       sourceComplete: true,
@@ -101,7 +101,7 @@ void main() {
   test('a withheld destination contributes no visible text', () {
     // The original #2343 case: the URL has not arrived, so nothing from it
     // may be counted as painted.
-    final WithheldMarkdownRegions r = analyzeWithheldMarkdownRegions(
+    final WithheldMarkdownRegions r = analyzeWithheldMarkdownRegionsOfSource(
       'see [help](https://secret.example',
       suppressRawHtml: true,
     );
@@ -162,7 +162,7 @@ void main() {
     // its own. A caller that removes the block and stays quiet gets a report
     // describing text that is not on its screen.
     expect(
-      analyzeWithheldMarkdownRegions(
+      analyzeWithheldMarkdownRegionsOfSource(
         '[ref]: https://example.test',
         sourceComplete: true,
         hideLinkReferenceDefinitions: true,
@@ -238,7 +238,7 @@ void main() {
     test('an unfinished destination in a later item keeps the earlier one', () {
       // The boundary is the PIECE's start, not the block's — otherwise the
       // first item is discarded along with the second.
-      final WithheldMarkdownRegions r = analyzeWithheldMarkdownRegions(
+      final WithheldMarkdownRegions r = analyzeWithheldMarkdownRegionsOfSource(
         '- first\n- [link](https://unfinished',
         suppressRawHtml: true,
       );
@@ -290,7 +290,7 @@ void main() {
     // adapter keeps those nodes in the list it hands the renderer precisely so
     // references resolve, and only suppresses their own rendering.
     expect(
-      analyzeWithheldMarkdownRegions(
+      analyzeWithheldMarkdownRegionsOfSource(
         'see [help][ref]\n\n[ref]: https://example.test',
         sourceComplete: true,
         hideLinkReferenceDefinitions: true,

@@ -45,7 +45,7 @@ String _painted(WidgetTester tester) {
 
 void main() {
   test('the analysis hides the tags and nothing else', () {
-    final WithheldMarkdownRegions regions = analyzeWithheldMarkdownRegions(
+    final WithheldMarkdownRegions regions = analyzeWithheldMarkdownRegionsOfSource(
       _source,
       suppressRawHtml: true,
       sourceComplete: true,
