@@ -253,6 +253,33 @@ void main() {
         0,
       );
 
+      // TWO unreadable blocks: the boundary belongs to the FIRST one. The scan
+      // stops there, so nothing later can move the boundary at all.
+      //
+      // What this catches is the scan carrying ON past an unreadable block:
+      // the second one's start is LARGER, so assigning it RAISES the boundary
+      // over a stretch nobody read. (A running minimum would answer 0 here
+      // too — this fixture does not separate those two, and is not trying to.)
+      final WithheldMarkdownRegions two = analyzeWithheldMarkdownRegionsOfSource(
+        'one\rtwo\n\nthree\rfour',
+      );
+      expect(two.safeEndCodeUnits, 0);
+
+      // The ledger stops cleanly, with no separator dangling off the end.
+      //
+      // A block separator is the gap BETWEEN two blocks, and once the scan
+      // stops there is no block after this one to be separated from. The
+      // earlier shape emitted it anyway — the next block asked for it before
+      // finding out it would be clipped — and its offset sat just below the
+      // boundary, so the clip kept it. `visibleText` ended in a `\n` that
+      // separated the last block from nothing.
+      final WithheldMarkdownRegions stops =
+          analyzeWithheldMarkdownRegionsOfSource(
+        'hello world\n\nlone\rCR here\n\nhello world',
+      );
+      expect(stops.visibleText, 'hello world');
+      expect(stops.visibleSourceOffsets.last, 10);
+
       // A `\r` that is the last code unit received is NOT a lone CR while the
       // source is still arriving — it is half of a CRLF that has not finished.
       // Calling it lone blanks the block being typed for one frame, and a
