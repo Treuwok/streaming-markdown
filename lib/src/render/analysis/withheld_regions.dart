@@ -117,6 +117,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     }
   }
 
+  final StreamingMarkdownRenderView projections = _projectionsView();
   final List<(int, int)> hidden = <(int, int)>[];
   final List<int> visibleUnits = <int>[];
   final List<int> visibleOffsets = <int>[];
@@ -234,42 +235,46 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     // slice. Scanning the raw slice was why headings kept their `#`, quotes
     // kept their `>` and paragraphs kept hard line breaks the screen folds
     // into spaces: the analysis was answering about a different string.
-    final _SourceSlice inline = _inlineSliceForBlock(block, blockRaw);
-    if (inline.isEmpty) {
-      continue;
-    }
-
-    final _InlineParseResult result = parser.scan(inline.text);
-
-    // Offsets are into `inline.text`; the slice says where each of those
-    // characters lives in the document.
-    int sourceAt(int indexInSlice) => indexInSlice < inline.offsets.length
-        ? inline.offsets[indexInSlice]
-        : inline.sourceEnd;
-
-    separateBlocks();
-    for (final _InlineToken token in result.tokens) {
-      final String painted = _paintedTextOf(token);
-      if (painted.isEmpty) {
+    for (final _SourceSlice inline
+        in _inlineSlicesForBlock(block, blockRaw, projections)) {
+      if (inline.isEmpty) {
         continue;
       }
-      // A token whose text is not a verbatim slice has no per-character
-      // origin, so all of it reports the construct that produced it.
-      final bool verbatim = token.isVerbatimSlice;
-      for (int k = 0; k < painted.length; k++) {
-        addUnit(painted.codeUnitAt(k),
-            sourceAt(token.visibleSourceStart + (verbatim ? k : 0)));
+
+      final _InlineParseResult result = parser.scan(inline.text);
+
+      // Offsets are into `inline.text`; the slice says where each of those
+      // characters lives in the document.
+      int sourceAt(int indexInSlice) => indexInSlice < inline.offsets.length
+          ? inline.offsets[indexInSlice]
+          : inline.sourceEnd;
+
+      // Each piece is its own line on screen — a list item, a table cell, a
+      // callout title above its body — so each gets its own separator.
+      separateBlocks();
+      for (final _InlineToken token in result.tokens) {
+        final String painted = _paintedTextOf(token);
+        if (painted.isEmpty) {
+          continue;
+        }
+        // A token whose text is not a verbatim slice has no per-character
+        // origin, so all of it reports the construct that produced it.
+        final bool verbatim = token.isVerbatimSlice;
+        for (int k = 0; k < painted.length; k++) {
+          addUnit(painted.codeUnitAt(k),
+              sourceAt(token.visibleSourceStart + (verbatim ? k : 0)));
+        }
       }
-    }
-    for (final (int start, int end) range in result.hiddenRanges) {
-      hidden.add((sourceAt(range.$1), sourceAt(range.$2 - 1) + 1));
-    }
-    final int? withheldFrom = result.withheldFrom;
-    if (withheldFrom != null) {
-      final int boundary =
-          withheldFrom == 0 ? block.start : sourceAt(withheldFrom - 1) + 1;
-      if (boundary < safeEnd) {
-        safeEnd = boundary;
+      for (final (int start, int end) range in result.hiddenRanges) {
+        hidden.add((sourceAt(range.$1), sourceAt(range.$2 - 1) + 1));
+      }
+      final int? withheldFrom = result.withheldFrom;
+      if (withheldFrom != null) {
+        final int boundary =
+            withheldFrom == 0 ? block.start : sourceAt(withheldFrom - 1) + 1;
+        if (boundary < safeEnd) {
+          safeEnd = boundary;
+        }
       }
     }
   }
@@ -345,21 +350,66 @@ bool _isRawTextHtmlOpening(String raw) {
 
 /// What this token puts on the screen.
 ///
-/// An image shows its alt text and a LaTeX span shows its expression rendered,
-/// so both contribute characters even though neither is a slice of the source.
+/// A LaTeX span shows its expression rendered, and those glyphs correspond to
+/// the expression, so it contributes that.
 ///
-/// A footnote REFERENCE deliberately contributes none: what it paints is a
-/// number, and the numbering is assigned by the renderer from the whole
-/// document, not by this scan. Reporting the marker's source instead would put
-/// `[^note]` on a ledger of what a reader sees.
+/// Two kinds deliberately contribute nothing, for the same reason: what they
+/// paint is not knowable from the source.
+///
+/// A footnote REFERENCE paints a number, and the numbering is assigned by the
+/// renderer from the whole document, which this scan does not have.
+///
+/// An inline IMAGE paints the image once it loads, nothing while it is
+/// loading, and a fallback line if it fails — three different screens for one
+/// source, decided at runtime. Reporting its alt text unconditionally would
+/// disagree with all three. This under-counts a failed image's fallback, and
+/// that is the honest direction: the report says less than the screen shows
+/// rather than claiming text that is usually not there.
 String _paintedTextOf(_InlineToken token) {
-  if (token.isImage) {
-    return token.altText;
+  if (token.isImage || token.isFootnoteReference) {
+    return '';
   }
   if (token.isLatex) {
     return token.latexExpression ?? '';
   }
   return token.text;
+}
+
+/// A configuration-only view, used to reach the renderer's own projections.
+///
+/// They are extension methods on the view, and the analysis has to call the
+/// SAME ones — a second copy of "how a list splits into items" is the thing
+/// this file exists to stop. Constructing one costs nothing; nothing is built.
+/// `debugMarkdownForSelectedPlainText` reaches them the same way.
+StreamingMarkdownRenderView _projectionsView() =>
+    const StreamingMarkdownRenderView(nodes: <MarkdownRenderNode>[]);
+
+MarkdownRenderNode _renderNodeFor(String raw, String type) =>
+    MarkdownRenderNode(
+      type: type,
+      depth: 0,
+      startByte: 0,
+      endByte: raw.length,
+      startRow: 0,
+      endRow: 0,
+      raw: raw,
+      content: raw,
+    );
+
+List<String> _tableCellTexts(
+    StreamingMarkdownRenderView view, String blockRaw) {
+  final _ParsedTable? table = view._parseMarkdownTable(
+    view._normalizedRaw(blockRaw),
+    allowLooseWithoutDelimiter: true,
+    minLooseRowsWithoutDelimiter: 2,
+  );
+  if (table == null) {
+    return const <String>[];
+  }
+  return <String>[
+    ...table.headers,
+    for (final List<String> row in table.rows) ...row,
+  ];
 }
 
 String _blockTypeOf(MarkdownBlockNode block) {
@@ -368,6 +418,9 @@ String _blockTypeOf(MarkdownBlockNode block) {
   }
   if (block is HeadingNode) {
     return block.type;
+  }
+  if (block is ListNode) {
+    return 'list';
   }
   return block is GenericBlockNode ? block.type : '';
 }
@@ -381,23 +434,55 @@ bool _isCodeBlock(MarkdownBlockNode block) =>
 /// One function, and the renderer's own extraction behind every branch — so
 /// "which part of this block is inline text" has one answer instead of one per
 /// consumer.
-_SourceSlice _inlineSliceForBlock(MarkdownBlockNode block, String blockRaw) {
+List<_SourceSlice> _inlineSlicesForBlock(
+  MarkdownBlockNode block,
+  String blockRaw,
+  StreamingMarkdownRenderView projections,
+) {
   final String type = _blockTypeOf(block);
   switch (type) {
     case 'atx_heading':
     case 'setext_heading':
-      return _headingSlice(blockRaw, block.start, type);
+      return <_SourceSlice>[_headingSlice(blockRaw, block.start, type)];
     case 'block_quote':
-      return _quoteSlice(blockRaw, block.start);
+      final _SourceSlice quote = _quoteSlice(blockRaw, block.start);
+      final _CalloutData? callout = projections._parseCallout(quote.text);
+      if (callout == null) {
+        return <_SourceSlice>[quote];
+      }
+      // The title is generated (`[!NOTE]` becomes `Note`), so it reports the
+      // marker it replaced rather than pretending to be a slice of it.
+      final int at = quote.offsets.isEmpty ? block.start : quote.offsets.first;
+      return <_SourceSlice>[
+        _SourceSlice(callout.title, List<int>.filled(callout.title.length, at)),
+        quote.locate(callout.body, 0, at),
+      ];
+    case 'list':
+    case 'list_item':
+      return _orderedSlices(
+        _normalizedSlice(blockRaw, block.start),
+        projections
+            ._parseListNode(_renderNodeFor(blockRaw, type))
+            .items
+            .map((_ParsedListItem item) => item.text)
+            .toList(growable: false),
+      );
+    case 'pipe_table':
+    case 'table':
+    case 'pipe_table_header':
+    case 'pipe_table_row':
+      return _orderedSlices(
+        _normalizedSlice(blockRaw, block.start),
+        _tableCellTexts(projections, blockRaw),
+      );
     default:
-      // Paragraphs, list items, tables, callouts and HTML blocks all reach the
-      // inline scan through the paragraph path in the block factory, which
-      // folds newlines into spaces before painting.
-      return _paragraphSlice(
-        blockRaw,
-        block.start,
-        block is GenericBlockNode ? block.content : '',
-      ).newlinesAsSpaces();
+      return <_SourceSlice>[
+        _paragraphSlice(
+          blockRaw,
+          block.start,
+          block is GenericBlockNode ? block.content : '',
+        ).newlinesAsSpaces(),
+      ];
   }
 }
 

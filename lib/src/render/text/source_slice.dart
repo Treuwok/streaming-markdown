@@ -56,23 +56,18 @@ final class _SourceSlice {
     return _SourceSlice(kept.toString(), keptOffsets);
   }
 
+  // Both delegate to Dart's own `String` methods to decide HOW MUCH to remove,
+  // so the definition of whitespace is identical to the methods these replaced
+  // — Unicode, not just ASCII. Hand-rolling the predicate silently started
+  // painting non-breaking spaces the renderer had always trimmed.
   _SourceSlice trimRight() {
-    int end = text.length;
-    while (end > 0 && _isTrimmable(text.codeUnitAt(end - 1))) {
-      end--;
-    }
+    final int end = text.trimRight().length;
     return end == text.length ? this : _range(0, end);
   }
 
   _SourceSlice trim() {
-    int start = 0;
-    int end = text.length;
-    while (start < end && _isTrimmable(text.codeUnitAt(start))) {
-      start++;
-    }
-    while (end > start && _isTrimmable(text.codeUnitAt(end - 1))) {
-      end--;
-    }
+    final int start = text.length - text.trimLeft().length;
+    final int end = start + text.trim().length;
     return (start == 0 && end == text.length) ? this : _range(start, end);
   }
 
@@ -109,8 +104,50 @@ final class _SourceSlice {
     return _SourceSlice(text.replaceAll('\n', ' '), offsets);
   }
 
-  static bool _isTrimmable(int unit) =>
-      unit == 32 || unit == 9 || unit == 10 || unit == 13;
+  /// Drops the trailing characters [pattern] matches at the end of [text].
+  _SourceSlice stripTrailing(RegExp pattern) {
+    final Iterable<RegExpMatch> matches = pattern.allMatches(text);
+    if (matches.isEmpty || matches.last.end != text.length) {
+      return this;
+    }
+    return _range(0, matches.last.start);
+  }
+
+  /// The sub-slice of this one holding [needle], searched from [from].
+  ///
+  /// For projections that produce a contiguous substring of their input — a
+  /// list item after its marker, a table cell between its pipes, a callout
+  /// body after its tag — this recovers the origins without threading them
+  /// through the parser that produced the substring.
+  ///
+  /// The search is confined to THIS slice and the caller advances [from] in
+  /// order, which is what keeps it exact: a repeated cell matches its own
+  /// occurrence, and a fence's first code line cannot match the info string
+  /// on the opening line because that line is not in this slice.
+  ///
+  /// Returns a slice pinned to [fallbackOffset] when the text is not a
+  /// substring — a projection that rewrote rather than deleted. Coarse, and
+  /// deliberately not a guess at a better position.
+  _SourceSlice locate(String needle, int from, int fallbackOffset) {
+    if (needle.isEmpty) {
+      return _SourceSlice.empty;
+    }
+    final int at = text.indexOf(needle, from.clamp(0, text.length));
+    if (at == -1) {
+      return _SourceSlice(
+        needle,
+        List<int>.filled(needle.length, fallbackOffset),
+      );
+    }
+    return _range(at, at + needle.length);
+  }
+
+  /// Index just past [needle] when found from [from], else [from].
+  int endOf(String needle, int from) {
+    final int at = text.indexOf(needle, from.clamp(0, text.length));
+    return at == -1 ? from : at + needle.length;
+  }
+
 }
 
 /// Rejoins lines with `\n`, each separator reporting the end of the line it
@@ -175,7 +212,13 @@ _SourceSlice _headingSlice(String raw, int rawStart, String type) {
   if (type == 'setext_heading') {
     return _stripSetextDelimiterSlice(source);
   }
-  return source.stripLeading(RegExp(r'^\s{0,3}#{1,6}\s*')).trim();
+  // The closing run is optional syntax, not content: CommonMark lets
+  // `# Title #` close the way it opened, and the parser's own content had it
+  // removed. Leaving it in put a `#` on the screen that was not there before.
+  return source
+      .stripLeading(RegExp(r'^\s{0,3}#{1,6}\s*'))
+      .stripTrailing(RegExp(r'\s+#+\s*$'))
+      .trim();
 }
 
 
@@ -233,4 +276,60 @@ _SourceSlice _codeSlice(String raw, int rawStart, String type) {
 
 bool _isSetextDelimiterLine(String line) {
   return RegExp(r'^\s{0,3}(=+|-+)\s*$').hasMatch(line);
+}
+
+/// Walks [texts] through [parent] in order, one slice each.
+///
+/// The renderer runs a separate inline scan per list item and per table cell,
+/// so the analysis has to see the same pieces — not one string with the
+/// markers and pipes still in it.
+List<_SourceSlice> _orderedSlices(_SourceSlice parent, List<String> texts) {
+  final List<_SourceSlice> slices = <_SourceSlice>[];
+  int cursor = 0;
+  for (final String text in texts) {
+    if (text.isEmpty) {
+      continue;
+    }
+    slices.add(parent.locate(
+        text, cursor, parent.offsets.isEmpty ? 0 : parent.offsets.first));
+    cursor = parent.endOf(text, cursor);
+  }
+  return slices;
+}
+
+/// The slice for the next list item body, advancing [readCursor] past it.
+///
+/// Items are taken in render order, so a repeated body matches its own line
+/// rather than an earlier identical one.
+_SourceSlice _nextItemSlice(
+  _SourceSlice parent,
+  String itemText,
+  int Function() readCursor,
+  void Function(int) writeCursor,
+) {
+  final int from = readCursor();
+  final _SourceSlice found = parent.locate(
+    itemText,
+    from,
+    parent.offsets.isEmpty ? 0 : parent.offsets.first,
+  );
+  writeCursor(parent.endOf(itemText, from));
+  return found;
+}
+
+/// [_contentOrRaw] with origins kept. The parser's assembled `content` has
+/// none, so that branch reports the block start throughout.
+_SourceSlice _contentOrRawSliceOf(String raw, int rawStart, String content) {
+  final String trimmedContent = content.trim();
+  if (trimmedContent.isNotEmpty) {
+    final _SourceSlice fromRaw = _normalizedSlice(raw, rawStart).trim();
+    if (fromRaw.text == trimmedContent) {
+      return fromRaw;
+    }
+    return _SourceSlice(
+      trimmedContent,
+      List<int>.filled(trimmedContent.length, rawStart),
+    );
+  }
+  return _normalizedSlice(raw, rawStart).trim();
 }

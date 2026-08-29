@@ -7,9 +7,10 @@ extension _StreamingMarkdownMetadataRenderer on StreamingMarkdownRenderView {
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
   }) {
-    final String text = _normalizedRaw(node.raw).trim().isNotEmpty
-        ? _normalizedRaw(node.raw).trim()
-        : _contentOrRaw(node);
+    final _SourceSlice fromRaw = _normalizedSlice(node.raw, 0).trim();
+    final _SourceSlice slice =
+        fromRaw.text.isNotEmpty ? fromRaw : _contentOrRawSlice(node);
+    final String text = slice.text;
     if (text.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -26,7 +27,7 @@ extension _StreamingMarkdownMetadataRenderer on StreamingMarkdownRenderView {
       ),
       child: _buildInlineMarkdown(
         context,
-        text,
+        slice,
         baseStyle: markdownTheme.metadataTextStyle ??
             const TextStyle(
               color: Color(0xFFF0F6FC),

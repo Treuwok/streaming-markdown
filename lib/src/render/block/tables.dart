@@ -18,6 +18,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
       return _buildTableWidget(
         context,
         parsed,
+        source: _normalizedSlice(node.raw, 0),
         linkReferences: linkReferences,
         footnoteNumbers: footnoteNumbers,
       );
@@ -28,6 +29,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
       return _buildTableWidget(
         context,
         snapshot,
+        source: _normalizedSlice(node.raw, 0),
         linkReferences: linkReferences,
         footnoteNumbers: footnoteNumbers,
       );
@@ -35,7 +37,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
 
     return _buildParagraphBlock(
       context,
-      _contentOrRaw(node),
+      _contentOrRawSlice(node),
       linkReferences: linkReferences,
       footnoteNumbers: footnoteNumbers,
     );
@@ -44,9 +46,13 @@ extension _StreamingMarkdownTableAndMetadataRenderer
   Widget _buildTableWidget(
     BuildContext context,
     _ParsedTable table, {
+    required _SourceSlice source,
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
   }) {
+    // Cells are contiguous runs between pipes. Taken in render order, each one
+    // matches its own occurrence even when two cells hold the same text.
+    int cellCursor = 0;
     final ThemeData theme = Theme.of(context);
     final ColorScheme colorScheme = theme.colorScheme;
     final _RevealScheduleScope? scheduleScope = _RevealScheduleScope.maybeOf(
@@ -128,9 +134,15 @@ extension _StreamingMarkdownTableAndMetadataRenderer
                 scrollDirection: Axis.horizontal,
                 child: Builder(
                   builder: (BuildContext tableContext) {
+                    // Reset per build: the cells are walked in the same order
+                    // every time, so the cursor must start where they do.
+                    cellCursor = 0;
                     final List<Widget> rowTables = _buildTableRows(
                       tableContext,
                       table: table,
+                      source: source,
+                      readCellCursor: () => cellCursor,
+                      writeCellCursor: (int v) => cellCursor = v,
                       theme: theme,
                       colorScheme: colorScheme,
                       headerBackground: headerBackground,
@@ -181,6 +193,9 @@ extension _StreamingMarkdownTableAndMetadataRenderer
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
     required List<List<int>> plainTextStarts,
+    required _SourceSlice source,
+    required int Function() readCellCursor,
+    required void Function(int) writeCellCursor,
   }) {
     Widget buildStableCellContent({
       required String cell,
@@ -192,7 +207,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
         enabled: true,
         child: _buildInlineMarkdown(
           context,
-          cell,
+          _nextItemSlice(source, cell, readCellCursor, writeCellCursor),
           tokenStartIndex: tokenStartIndex,
           plainTextStart: plainTextStart,
           baseStyle: baseStyle,

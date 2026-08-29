@@ -1,6 +1,9 @@
 part of '../view.dart';
 
 extension _StreamingMarkdownContentParsing on StreamingMarkdownRenderView {
+  _SourceSlice _contentOrRawSlice(MarkdownRenderNode node) =>
+      _contentOrRawSliceOf(node.raw, 0, node.content);
+
   String _contentOrRaw(MarkdownRenderNode node) {
     if (node.content.trim().isNotEmpty) {
       return node.content.trim();

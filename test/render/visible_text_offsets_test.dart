@@ -163,4 +163,47 @@ void main() {
       isEmpty,
     );
   });
+
+  group('list, table and callout projections (codex R2)', () {
+    const Map<String, String> cases = <String, String>{
+      '- item one\n- item two': 'item one\nitem two',
+      '1. first\n2. second': 'first\nsecond',
+      '| a | b |\n| --- | --- |\n| c | d |': 'a\nb\nc\nd',
+      '> [!NOTE]\n> body text': 'Note\nbody text',
+      '# Title #': 'Title',
+    };
+    cases.forEach((String source, String expected) {
+      test(source.split('\n').join('|'),
+          () => expect(_scan(source).visibleText, expected));
+    });
+  });
+
+  test('a repeated table cell maps to its own occurrence', () {
+    // The reason the walk is in order rather than a plain search: two cells
+    // holding the same text must not both point at the first one.
+    const String source = '| x | y |\n| --- | --- |\n| y | z |';
+    final WithheldMarkdownRegions r = _scan(source);
+    final int firstY = source.indexOf('y');
+    final int secondY = source.indexOf('y', firstY + 1);
+    expect(firstY, isNot(secondY));
+    final List<int> yOffsets = <int>[
+      for (int i = 0; i < r.visibleText.length; i++)
+        if (r.visibleText[i] == 'y') r.visibleSourceOffsets[i],
+    ];
+    expect(yOffsets, <int>[firstY, secondY]);
+  });
+
+  test('trimming uses the same whitespace definition as the renderer', () {
+    // A non-breaking space is whitespace to `String.trim`, which is what the
+    // renderer used. An ASCII-only predicate kept it and started painting it.
+    expect(_scan('\u00a0text\u00a0').visibleText, 'text');
+  });
+
+  test('an inline image contributes no characters', () {
+    // It paints an image once loaded, nothing while loading, and a fallback
+    // line on error — three screens for one source, decided at runtime. Alt
+    // text agrees with none of them.
+    expect(_scan('before ![cat](https://example.test/c.png) after').visibleText,
+        'before  after');
+  });
 }

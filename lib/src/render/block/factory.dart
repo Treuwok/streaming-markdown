@@ -65,13 +65,14 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
           return _buildTableWidget(
             context,
             paragraphTable,
+            source: _normalizedSlice(node.raw, 0),
             linkReferences: linkReferences,
             footnoteNumbers: footnoteNumbers,
           );
         }
         return _buildParagraphBlock(
           context,
-          _paragraphText(node),
+          _paragraphSlice(node.raw, 0, node.content),
           linkReferences: linkReferences,
           footnoteNumbers: footnoteNumbers,
         );
@@ -124,7 +125,7 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
           // flag, so the two answers cannot disagree about what this paints.
           return _buildParagraphBlock(
             context,
-            _paragraphText(node),
+            _paragraphSlice(node.raw, 0, node.content),
             linkReferences: linkReferences,
             footnoteNumbers: footnoteNumbers,
           );
@@ -153,7 +154,7 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
       default:
         return _buildParagraphBlock(
           context,
-          _paragraphText(node),
+          _paragraphSlice(node.raw, 0, node.content),
           linkReferences: linkReferences,
           footnoteNumbers: footnoteNumbers,
         );
@@ -204,7 +205,7 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
 
     return _buildInlineMarkdown(
       context,
-      _headingText(node),
+      _headingSlice(node.raw, 0, node.type),
       baseStyle: style,
       linkReferences: linkReferences,
       footnoteNumbers: footnoteNumbers,
@@ -213,7 +214,7 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
 
   Widget _buildParagraphBlock(
     BuildContext context,
-    String text, {
+    _SourceSlice text, {
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
   }) {
@@ -221,7 +222,8 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
       return const SizedBox.shrink();
     }
 
-    final String normalizedParagraph = text.replaceAll('\n', ' ');
+    final _SourceSlice paragraph = text.newlinesAsSpaces();
+    final String normalizedParagraph = paragraph.text;
     final TextStyle paragraphStyle = markdownTheme.paragraphTextStyle ??
         Theme.of(context).textTheme.bodyLarge ??
         const TextStyle(fontSize: 16);
@@ -240,7 +242,7 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
 
     return _buildInlineMarkdown(
       context,
-      normalizedParagraph,
+      paragraph,
       baseStyle: paragraphStyle,
       linkReferences: linkReferences,
       footnoteNumbers: footnoteNumbers,
