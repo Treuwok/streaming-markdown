@@ -37,10 +37,10 @@ void main() {
       const String firstBlock =
           'SelectedFirstLineStaysAnchored lower wrapped text in this same markdown block must never become selected, even while content streams in and the scroll view is moving.';
       List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-        _renderNode(firstBlock, startByte: 0),
+        _renderNode(firstBlock, startCodeUnit: 0),
         _renderNode(
           'Second line must never become selected.',
-          startByte: firstBlock.length + 2,
+          startCodeUnit: firstBlock.length + 2,
           startRow: 2,
         ),
       ];
@@ -113,16 +113,16 @@ void main() {
         if (frame % 10 == 0) {
           updateHost(() {
             nodes = <MarkdownRenderNode>[
-              _renderNode(firstBlock, startByte: 0),
+              _renderNode(firstBlock, startCodeUnit: 0),
               _renderNode(
                 'Second line must never become selected.',
-                startByte: firstBlock.length + 2,
+                startCodeUnit: firstBlock.length + 2,
                 startRow: 2,
               ),
               for (int i = 0; i <= frame ~/ 10; i++)
                 _renderNode(
                   'Streaming append block $i keeps layout moving.',
-                  startByte: 80 + i * 48,
+                  startCodeUnit: 80 + i * 48,
                   startRow: 4 + i * 2,
                 ),
             ];
@@ -170,10 +170,10 @@ void main() {
           'FirstLockedLineStaysPut while appended content and scroll changes try to move the viewport.';
       const String secondLine = 'SecondLineCanBeSelectedAfterLock';
       List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-        _renderNode(firstBlock, startByte: 0),
+        _renderNode(firstBlock, startCodeUnit: 0),
         _renderNode(
           secondLine,
-          startByte: firstBlock.length + 2,
+          startCodeUnit: firstBlock.length + 2,
           startRow: 2,
         ),
       ];
@@ -244,15 +244,15 @@ void main() {
       scrollController.jumpTo(10);
       updateHost(() {
         nodes = <MarkdownRenderNode>[
-          _renderNode(firstBlock, startByte: 0),
+          _renderNode(firstBlock, startCodeUnit: 0),
           _renderNode(
             secondLine,
-            startByte: firstBlock.length + 2,
+            startCodeUnit: firstBlock.length + 2,
             startRow: 2,
           ),
           _renderNode(
             'Streaming append keeps arriving while the old selection is locked.',
-            startByte: firstBlock.length + secondLine.length + 4,
+            startCodeUnit: firstBlock.length + secondLine.length + 4,
             startRow: 4,
           ),
         ];
@@ -335,12 +335,12 @@ void main() {
           '| Q | Quiet | Loud |\n'
           '| X | Calm | Busy |';
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-        _renderNode(prefix, startByte: 0),
+        _renderNode(prefix, startCodeUnit: 0),
         const MarkdownRenderNode(
           type: 'pipe_table',
           depth: 0,
-          startByte: prefix.length + 2,
-          endByte: prefix.length + 2 + rawTable.length,
+          startCodeUnit: prefix.length + 2,
+          endCodeUnit: prefix.length + 2 + rawTable.length,
           startRow: 2,
           endRow: 5,
           raw: rawTable,
@@ -592,14 +592,14 @@ Offset _textOffsetToPosition(RenderParagraph paragraph, int offset) {
 
 MarkdownRenderNode _renderNode(
   String raw, {
-  int startByte = 0,
+  int startCodeUnit = 0,
   int startRow = 0,
 }) {
   return MarkdownRenderNode(
     type: 'paragraph',
     depth: 0,
-    startByte: startByte,
-    endByte: startByte + raw.length,
+    startCodeUnit: startCodeUnit,
+    endCodeUnit: startCodeUnit + raw.length,
     startRow: startRow,
     endRow: startRow,
     raw: raw,

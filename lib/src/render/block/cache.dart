@@ -2,11 +2,11 @@ part of '../view.dart';
 
 extension _StreamingMarkdownBlockCache on StreamingMarkdownRenderView {
   String _blockIdentity(MarkdownRenderNode node) {
-    return '${node.type}:${node.startByte}:${node.depth}';
+    return '${node.type}:${node.startCodeUnit}:${node.depth}';
   }
 
   String _tableSnapshotKey(MarkdownRenderNode node) {
-    return '${node.startByte}:${node.startRow}:${node.depth}:'
+    return '${node.startCodeUnit}:${node.startRow}:${node.depth}:'
         '${_tableSnapshotHeaderKey(node)}';
   }
 
@@ -98,7 +98,7 @@ extension _StreamingMarkdownBlockCache on StreamingMarkdownRenderView {
     String refsDigest,
     String renderConfigDigest,
   ) {
-    return '${node.type}:${node.startByte}:${node.endByte}:${node.startRow}:${node.endRow}:${node.raw.hashCode}:$refsDigest:$renderConfigDigest';
+    return '${node.type}:${node.startCodeUnit}:${node.endCodeUnit}:${node.startRow}:${node.endRow}:${node.raw.hashCode}:$refsDigest:$renderConfigDigest';
   }
 
   String _renderConfigDigest(BuildContext context) {

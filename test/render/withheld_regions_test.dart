@@ -13,8 +13,8 @@ import 'package:flutter_test/flutter_test.dart';
 MarkdownRenderNode _paragraph(String source) => MarkdownRenderNode(
       type: 'paragraph',
       depth: 0,
-      startByte: 0,
-      endByte: source.length,
+      startCodeUnit: 0,
+      endCodeUnit: source.length,
       startRow: 0,
       endRow: 0,
       raw: source,
@@ -24,8 +24,8 @@ MarkdownRenderNode _paragraph(String source) => MarkdownRenderNode(
 MarkdownRenderNode _htmlBlock(String source) => MarkdownRenderNode(
       type: 'html_block',
       depth: 0,
-      startByte: 0,
-      endByte: source.length,
+      startCodeUnit: 0,
+      endCodeUnit: source.length,
       startRow: 0,
       endRow: 0,
       raw: source,
@@ -86,7 +86,7 @@ void main() {
     test('counts UTF-16 code units, not bytes', () {
       // The failure this pins is silent: every offset here is identical under
       // both units for ASCII, so an ASCII-only fixture cannot see it. The
-      // block model calls these offsets `startByte` and they are not.
+      // block model calls these offsets `startCodeUnit` and they are not.
       const String prefix = '先看這裡 ';
       const String source = '$prefix[help](https://secret.example';
       final WithheldMarkdownRegions regions =

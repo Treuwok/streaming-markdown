@@ -34,6 +34,9 @@ export 'src/model/syntax_tree.dart';
 /// Render node model used by streaming render pipeline.
 export 'src/model/render_node.dart';
 
+/// Translation between UTF-8 byte offsets and Dart string code units.
+export 'src/model/utf8_code_unit_index.dart';
+
 /// Native incremental markdown parser session API.
 export 'src/native/incremental_parser_stub.dart'
     if (dart.library.ffi) 'src/native/incremental_parser.dart';

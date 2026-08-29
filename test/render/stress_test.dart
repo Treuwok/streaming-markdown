@@ -51,8 +51,8 @@ void main() {
       (int i) => MarkdownRenderNode(
         type: i % 40 == 0 ? 'atx_heading' : 'paragraph',
         depth: 0,
-        startByte: i * 80,
-        endByte: i * 80 + 79,
+        startCodeUnit: i * 80,
+        endCodeUnit: i * 80 + 79,
         startRow: i,
         endRow: i,
         raw: i % 40 == 0

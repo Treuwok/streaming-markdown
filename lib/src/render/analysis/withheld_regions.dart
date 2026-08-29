@@ -536,8 +536,8 @@ MarkdownRenderNode _renderNodeFor(String raw, String type) =>
     MarkdownRenderNode(
       type: type,
       depth: 0,
-      startByte: 0,
-      endByte: raw.length,
+      startCodeUnit: 0,
+      endCodeUnit: raw.length,
       startRow: 0,
       endRow: 0,
       raw: raw,

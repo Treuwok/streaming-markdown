@@ -17,11 +17,11 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
 
     final List<MarkdownRenderNode> sorted = blockNodes.toList(growable: false)
       ..sort((MarkdownRenderNode a, MarkdownRenderNode b) {
-        final int byStart = a.startByte.compareTo(b.startByte);
+        final int byStart = a.startCodeUnit.compareTo(b.startCodeUnit);
         if (byStart != 0) {
           return byStart;
         }
-        final int byEnd = b.endByte.compareTo(a.endByte);
+        final int byEnd = b.endCodeUnit.compareTo(a.endCodeUnit);
         if (byEnd != 0) {
           return byEnd;
         }
@@ -36,14 +36,14 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
     MarkdownRenderNode? lastContainer;
 
     for (final MarkdownRenderNode node in normalized) {
-      final String spanKey = '${node.startByte}:${node.endByte}:${node.type}';
+      final String spanKey = '${node.startCodeUnit}:${node.endCodeUnit}:${node.type}';
       if (!seenSpans.add(spanKey)) {
         continue;
       }
 
       if (lastContainer != null &&
-          node.startByte >= lastContainer.startByte &&
-          node.endByte <= lastContainer.endByte &&
+          node.startCodeUnit >= lastContainer.startCodeUnit &&
+          node.endCodeUnit <= lastContainer.endCodeUnit &&
           node.depth > lastContainer.depth) {
         continue;
       }
@@ -52,7 +52,7 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
       if (_containerConsumesChildren(node.type)) {
         lastContainer = node;
       } else if (lastContainer != null &&
-          node.endByte > lastContainer.endByte) {
+          node.endCodeUnit > lastContainer.endCodeUnit) {
         lastContainer = null;
       }
     }
@@ -116,19 +116,19 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
   MarkdownRenderNode _synthesizeTableNodeFromFragments(
     List<MarkdownRenderNode> fragments,
   ) {
-    int startByte = fragments.first.startByte;
-    int endByte = fragments.first.endByte;
+    int startByte = fragments.first.startCodeUnit;
+    int endByte = fragments.first.endCodeUnit;
     int startRow = fragments.first.startRow;
     int endRow = fragments.first.endRow;
     int depth = fragments.first.depth;
     final StringBuffer raw = StringBuffer();
     for (int i = 0; i < fragments.length; i++) {
       final MarkdownRenderNode fragment = fragments[i];
-      if (fragment.startByte < startByte) {
-        startByte = fragment.startByte;
+      if (fragment.startCodeUnit < startByte) {
+        startByte = fragment.startCodeUnit;
       }
-      if (fragment.endByte > endByte) {
-        endByte = fragment.endByte;
+      if (fragment.endCodeUnit > endByte) {
+        endByte = fragment.endCodeUnit;
       }
       if (fragment.startRow < startRow) {
         startRow = fragment.startRow;
@@ -152,8 +152,8 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
     return MarkdownRenderNode(
       type: 'pipe_table',
       depth: depth,
-      startByte: startByte,
-      endByte: endByte,
+      startCodeUnit: startByte,
+      endCodeUnit: endByte,
       startRow: startRow,
       endRow: endRow,
       raw: raw.toString(),
@@ -169,8 +169,8 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
       if (!_isTableContainerNode(candidate.type)) {
         continue;
       }
-      if (candidate.startByte <= node.startByte &&
-          candidate.endByte >= node.endByte &&
+      if (candidate.startCodeUnit <= node.startCodeUnit &&
+          candidate.endCodeUnit >= node.endCodeUnit &&
           candidate.depth <= node.depth) {
         return true;
       }

@@ -71,7 +71,7 @@ void _parseWorkerMain(SendPort mainSendPort) {
         blockCount = incremental.blockCount();
         inlineTypeCount = incremental.inlineTypeCount();
         if (includeNodes) {
-          renderNodes = _normalizeVisibleNodes(incremental.blockNodes());
+          renderNodes = _normalizeVisibleNodes(incremental.blockNodes(), text);
           visibleNodes = renderNodes;
         } else {
           renderNodes = <Map<String, Object>>[];
@@ -126,9 +126,20 @@ int _msgInt(Object? value, {int fallback = 0}) {
   return fallback;
 }
 
+/// Turns the native parser's node maps into the shape the render node model
+/// expects — including its coordinates.
+///
+/// [source] is required because tree-sitter counts BYTES and a Dart string is
+/// indexed in code units. The two agree for ASCII and disagree for everything
+/// else, so a field carrying one of them without saying which was correct
+/// exactly as long as nobody wrote a non-Latin character. Converted here, at
+/// the boundary where the unit is still known, so that nothing downstream has
+/// to ask which parser produced a block.
 List<Map<String, Object>> _normalizeVisibleNodes(
   List<Map<String, Object>> rawNodes,
+  String source,
 ) {
+  final Utf8CodeUnitIndex index = Utf8CodeUnitIndex(source);
   final List<Map<String, Object>> out = <Map<String, Object>>[];
   for (final Map<String, Object> node in rawNodes) {
     final String type = (node['type'] as String?) ?? 'unknown';
@@ -139,10 +150,26 @@ List<Map<String, Object>> _normalizeVisibleNodes(
       continue;
     }
 
-    out.add(<String, Object>{...node, 'content': content});
+    final Map<String, Object> converted = <String, Object>{...node}
+      ..remove('startByte')
+      ..remove('endByte');
+    out.add(<String, Object>{
+      ...converted,
+      'content': content,
+      // Reads the native key (bytes), writes the converted one (code units).
+      // Two names because they are two different numbers.
+      'startCodeUnit': index.codeUnitFor(_asIntOr0(node['startByte'])),
+      'endCodeUnit': index.codeUnitFor(_asIntOr0(node['endByte'])),
+    });
   }
   return out;
 }
+
+int _asIntOr0(Object? value) => value is int
+    ? value
+    : value is num
+        ? value.toInt()
+        : 0;
 
 String _meaningfulContent(String type, String raw) {
   String content = raw.replaceAll('\r', '').trim();
@@ -273,8 +300,8 @@ Map<String, Object> _renderNodeToMap(MarkdownRenderNode node) {
   return <String, Object>{
     'type': node.type,
     'depth': node.depth,
-    'startByte': node.startByte,
-    'endByte': node.endByte,
+    'startCodeUnit': node.startCodeUnit,
+    'endCodeUnit': node.endCodeUnit,
     'startRow': node.startRow,
     'endRow': node.endRow,
     'raw': node.raw,

@@ -3,8 +3,12 @@ import 'dart:convert';
 /// Immutable tree-sitter syntax node.
 ///
 /// This model is returned by [TreeSitterMarkdownParser] when callers need the
-/// full markdown syntax tree instead of normalized render blocks. Byte offsets
-/// use UTF-8 offsets from the original markdown source.
+/// full markdown syntax tree instead of normalized render blocks.
+///
+/// Its offsets really are UTF-8 bytes — this is tree-sitter's own tree,
+/// straight from tree-sitter, and it has no second producer. That is the
+/// difference from `MarkdownRenderNode`, whose equivalent field had two
+/// producers disagreeing about the unit and is now named for what it holds.
 class MarkdownSyntaxNode {
   /// Creates a syntax node with source range, optional source [text], and
   /// nested [children].

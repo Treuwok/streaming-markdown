@@ -6,6 +6,7 @@ import 'dart:html' as html;
 import 'dart:js' as js;
 
 import '../model/render_node.dart';
+import '../model/utf8_code_unit_index.dart';
 
 typedef _WasmStringParser = String? Function(String input);
 typedef _WasmBlockNodeParser = String? Function(String input, int maxNodes);
@@ -49,9 +50,12 @@ class StreamingMarkdownWasmParser {
       return null;
     }
 
+    // Same reason as the isolate's funnel: the wasm build is the same
+    // tree-sitter, so its offsets are bytes and have to be translated here.
+    final Utf8CodeUnitIndex index = Utf8CodeUnitIndex(markdown);
     return decoded
         .whereType<Map<dynamic, dynamic>>()
-        .map(_normalizeRenderNode)
+        .map((Map<dynamic, dynamic> map) => _normalizeRenderNode(map, index))
         .where((MarkdownRenderNode node) => !_shouldDropNode(node))
         .toList(growable: false);
   }
@@ -169,13 +173,16 @@ class StreamingMarkdownWasmParser {
     ]) as js.JsFunction;
   }
 
-  static MarkdownRenderNode _normalizeRenderNode(Map<dynamic, dynamic> map) {
+  static MarkdownRenderNode _normalizeRenderNode(
+    Map<dynamic, dynamic> map,
+    Utf8CodeUnitIndex index,
+  ) {
     final MarkdownRenderNode node = MarkdownRenderNode.fromDynamicMap(map);
     return MarkdownRenderNode(
       type: node.type,
       depth: node.depth,
-      startByte: node.startByte,
-      endByte: node.endByte,
+      startCodeUnit: index.codeUnitFor(node.startCodeUnit),
+      endCodeUnit: index.codeUnitFor(node.endCodeUnit),
       startRow: node.startRow,
       endRow: node.endRow,
       raw: node.raw,

@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import '../model/block_nodes.dart';
 import '../model/render_node.dart';
+import '../model/utf8_code_unit_index.dart';
 import '../native/incremental_parser.dart';
 import '../native/symbols.dart';
 import '../parser/rope_markdown_parser.dart';
@@ -413,7 +414,7 @@ class MarkdownSyncParser {
       blockCount = native.blockCount();
       inlineTypeCount = native.inlineTypeCount();
       renderNodes = includeNodes
-          ? _nodesFromMaps(_normalizeVisibleNodes(native.blockNodes()))
+          ? _nodesFromMaps(_normalizeVisibleNodes(native.blockNodes(), text))
           : const <MarkdownRenderNode>[];
     } else {
       final MarkdownDocument document =
@@ -467,8 +468,8 @@ class MarkdownSyncParser {
       return MarkdownRenderNode(
         type: _fallbackNodeType(block),
         depth: 0,
-        startByte: block.start,
-        endByte: block.end,
+        startCodeUnit: block.start,
+        endCodeUnit: block.end,
         startRow: startRow,
         endRow: endRow,
         raw: raw,
