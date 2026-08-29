@@ -50,9 +50,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
   }) {
-    // Cells are contiguous runs between pipes. Taken in render order, each one
-    // matches its own occurrence even when two cells hold the same text.
-    int cellCursor = 0;
+    final int cellOrigin = source.offsets.isEmpty ? 0 : source.offsets.first;
     final ThemeData theme = Theme.of(context);
     final ColorScheme colorScheme = theme.colorScheme;
     final _RevealScheduleScope? scheduleScope = _RevealScheduleScope.maybeOf(
@@ -134,15 +132,10 @@ extension _StreamingMarkdownTableAndMetadataRenderer
                 scrollDirection: Axis.horizontal,
                 child: Builder(
                   builder: (BuildContext tableContext) {
-                    // Reset per build: the cells are walked in the same order
-                    // every time, so the cursor must start where they do.
-                    cellCursor = 0;
                     final List<Widget> rowTables = _buildTableRows(
                       tableContext,
                       table: table,
-                      source: source,
-                      readCellCursor: () => cellCursor,
-                      writeCellCursor: (int v) => cellCursor = v,
+                      cellOrigin: cellOrigin,
                       theme: theme,
                       colorScheme: colorScheme,
                       headerBackground: headerBackground,
@@ -193,9 +186,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
     required List<List<int>> plainTextStarts,
-    required _SourceSlice source,
-    required int Function() readCellCursor,
-    required void Function(int) writeCellCursor,
+    required int cellOrigin,
   }) {
     Widget buildStableCellContent({
       required String cell,
@@ -207,7 +198,11 @@ extension _StreamingMarkdownTableAndMetadataRenderer
         enabled: true,
         child: _buildInlineMarkdown(
           context,
-          _nextItemSlice(source, cell, readCellCursor, writeCellCursor),
+          // Painted only. The table's per-cell origins are produced by
+          // `_tableCellSlices`, which splits rather than searches; the widget
+          // does not carry them, and says so rather than handing over a
+          // position found by looking the text up again.
+          _SourceSlice.generated(cell, cellOrigin),
           tokenStartIndex: tokenStartIndex,
           plainTextStart: plainTextStart,
           baseStyle: baseStyle,

@@ -50,6 +50,9 @@ final class _SourceSlice {
         located: located,
       );
 
+  /// The sub-slice `[start, end)` of this one, origins intact.
+  _SourceSlice sub(int start, int end) => _range(start, end);
+
   _SourceSlice withoutCarriageReturns() {
     if (!text.contains('\r')) {
       return this;
@@ -162,41 +165,6 @@ final class _SourceSlice {
     return _range(0, matches.last.start);
   }
 
-  /// The sub-slice of this one holding [needle], searched from [from].
-  ///
-  /// For projections that produce a contiguous substring of their input — a
-  /// list item after its marker, a table cell between its pipes, a callout
-  /// body after its tag — this recovers the origins without threading them
-  /// through the parser that produced the substring.
-  ///
-  /// The search is confined to THIS slice and the caller advances [from] in
-  /// order, which is what keeps it exact: a repeated cell matches its own
-  /// occurrence, and a fence's first code line cannot match the info string
-  /// on the opening line because that line is not in this slice.
-  ///
-  /// Returns a slice pinned to [fallbackOffset] when the text is not a
-  /// substring — a projection that rewrote rather than deleted. Coarse, and
-  /// deliberately not a guess at a better position.
-  _SourceSlice locate(String needle, int from, int fallbackOffset) {
-    if (needle.isEmpty) {
-      return _SourceSlice.empty;
-    }
-    final int at = text.indexOf(needle, from.clamp(0, text.length));
-    if (at == -1) {
-      return _SourceSlice(
-        needle,
-        List<int>.filled(needle.length, fallbackOffset),
-        located: false,
-      );
-    }
-    return _range(at, at + needle.length);
-  }
-
-  /// Index just past [needle] when found from [from], else [from].
-  int endOf(String needle, int from) {
-    final int at = text.indexOf(needle, from.clamp(0, text.length));
-    return at == -1 ? from : at + needle.length;
-  }
 
 }
 
@@ -328,44 +296,6 @@ bool _isSetextDelimiterLine(String line) {
   return RegExp(r'^\s{0,3}(=+|-+)\s*$').hasMatch(line);
 }
 
-/// Walks [texts] through [parent] in order, one slice each.
-///
-/// The renderer runs a separate inline scan per list item and per table cell,
-/// so the analysis has to see the same pieces — not one string with the
-/// markers and pipes still in it.
-List<_SourceSlice> _orderedSlices(_SourceSlice parent, List<String> texts) {
-  final List<_SourceSlice> slices = <_SourceSlice>[];
-  int cursor = 0;
-  for (final String text in texts) {
-    if (text.isEmpty) {
-      continue;
-    }
-    slices.add(parent.locate(
-        text, cursor, parent.offsets.isEmpty ? 0 : parent.offsets.first));
-    cursor = parent.endOf(text, cursor);
-  }
-  return slices;
-}
-
-/// The slice for the next list item body, advancing [readCursor] past it.
-///
-/// Items are taken in render order, so a repeated body matches its own line
-/// rather than an earlier identical one.
-_SourceSlice _nextItemSlice(
-  _SourceSlice parent,
-  String itemText,
-  int Function() readCursor,
-  void Function(int) writeCursor,
-) {
-  final int from = readCursor();
-  final _SourceSlice found = parent.locate(
-    itemText,
-    from,
-    parent.offsets.isEmpty ? 0 : parent.offsets.first,
-  );
-  writeCursor(parent.endOf(itemText, from));
-  return found;
-}
 
 /// [_contentOrRaw] with origins kept. The parser's assembled `content` has
 /// none, so that branch reports the block start throughout.

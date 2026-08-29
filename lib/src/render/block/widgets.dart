@@ -8,10 +8,6 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
     required Map<String, int> footnoteNumbers,
   }) {
     final _ParsedList parsed = _parseListNode(node);
-    // Item bodies are contiguous runs of the block, after each marker. Walking
-    // them in order keeps every one pinned to its own occurrence.
-    final _SourceSlice listSlice = _normalizedSlice(node.raw, 0);
-    int listCursor = 0;
     if (parsed.items.isEmpty) {
       return _buildParagraphBlock(
         context,
@@ -56,8 +52,7 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
             Expanded(
               child: _buildInlineMarkdown(
                 context,
-                _nextItemSlice(listSlice, item.text, () => listCursor,
-                    (int v) => listCursor = v),
+                item.body,
                 tokenStartIndex: tokenStartIndex,
                 plainTextStart: itemPlainTextStart,
                 baseStyle: baseStyle,
@@ -140,9 +135,7 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
           ],
           _buildInlineMarkdown(
             context,
-            callout == null
-                ? quote
-                : quote.locate(callout.body, 0, quote.offsets.isEmpty ? 0 : quote.offsets.first),
+            callout == null ? quote : callout.bodySlice,
             baseStyle: markdownTheme.paragraphTextStyle ??
                 Theme.of(context).textTheme.bodyLarge,
             linkReferences: linkReferences,

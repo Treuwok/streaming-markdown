@@ -127,7 +127,8 @@ void main() {
       '> quoted text': 'quoted text',
       '> line one\n> line two': 'line one\nline two',
       'first line\nsecond line': 'first line second line',
-      '```dart\ndart\n```': 'dart',
+      // header + body: the info string is painted above the code.
+      '```dart\ndart\n```': 'dart\ndart',
       '```\ncode   \n```': 'code',
     };
     cases.forEach((String source, String expected) {
@@ -256,5 +257,25 @@ void main() {
           .toList(),
       <String>['<a href="https://secret.example">', '</a>'],
     );
+  });
+
+  test('a code block reports its header (codex R4)', () {
+    // The info string is painted above the body, so it is on the screen.
+    expect(_scan('```dart\nlet x = 1\n```').visibleText, 'dart\nlet x = 1');
+  });
+
+  test('a list body is not confused with its own marker (codex R4)', () {
+    // `1. 1` — searching the block for the body `1` used to find the ordered
+    // marker. The body's position now comes from the match that produced it.
+    final WithheldMarkdownRegions r = _scan('1. 1');
+    expect(r.visibleText, '1');
+    expect(r.visibleSourceOffsets, <int>['1. '.length]);
+  });
+
+  test('a footnote body is not confused with its identifier (codex R4)', () {
+    final WithheldMarkdownRegions r = _scan('[^note]: note');
+    expect(r.visibleText, 'note: note');
+    // The label is generated; the body points at the real body.
+    expect(r.visibleSourceOffsets.last, '[^note]: not'.length);
   });
 }

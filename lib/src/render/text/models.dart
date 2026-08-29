@@ -12,15 +12,19 @@ class _ParsedListItem {
     required this.ordered,
     required this.order,
     required this.taskState,
-    required this.text,
+    required this.body,
     required this.stableKey,
   });
+
+  /// The item's painted text with its origins. [text] is this, flattened.
+  final _SourceSlice body;
+
+  String get text => body.text;
 
   final int level;
   final bool ordered;
   final int order;
   final bool? taskState;
-  final String text;
   final String stableKey;
 }
 
@@ -34,13 +38,21 @@ class _ParsedTable {
 class _CalloutData {
   const _CalloutData({
     required this.kind,
-    required this.title,
-    required this.body,
+    required this.titleSlice,
+    required this.bodySlice,
   });
 
   final String kind;
-  final String title;
-  final String body;
+
+  /// The title as painted. A DEFAULT title (`Note`) is generated and reports
+  /// the marker it replaced; a CUSTOM one is a real slice of the first line.
+  final _SourceSlice titleSlice;
+
+  /// The body with its origins.
+  final _SourceSlice bodySlice;
+
+  String get title => titleSlice.text;
+  String get body => bodySlice.text;
 }
 
 class _DelimitedMatch {
@@ -123,10 +135,14 @@ class _LatexMatch {
 }
 
 class _FootnoteDefinition {
-  const _FootnoteDefinition({required this.id, required this.body});
+  const _FootnoteDefinition({required this.id, required this.bodySlice});
 
   final String id;
-  final String body;
+
+  /// The body with its origins. [body] is this, flattened.
+  final _SourceSlice bodySlice;
+
+  String get body => bodySlice.text;
 }
 
 int? _footnoteNumberForId(Map<String, int> footnoteNumbers, String id) {

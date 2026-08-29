@@ -59,30 +59,44 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
         return _BlockProjection(<_SourceSlice>[paragraph]);
       case 'list':
       case 'list_item':
-        return _BlockProjection(_orderedSlices(
-          _normalizedSlice(node.raw, 0),
-          _parseListNode(node)
-              .items
-              .map((_ParsedListItem item) => item.text)
-              .toList(growable: false),
-        ));
+        return _BlockProjection(_parseListNode(node)
+            .items
+            .map((_ParsedListItem item) => item.body)
+            .toList(growable: false));
       case 'block_quote':
         final _SourceSlice quote = _quoteSlice(node.raw, 0);
         final _CalloutData? callout = _parseCallout(quote.text);
         if (callout == null) {
           return _BlockProjection(<_SourceSlice>[quote]);
         }
-        final int at = quote.offsets.isEmpty ? 0 : quote.offsets.first;
         return _BlockProjection(
-          <_SourceSlice>[quote.locate(callout.body, 0, at)],
+          <_SourceSlice>[callout.bodySlice],
           // The title is drawn by a plain `Text`, so it is literal — a custom
           // title like `**Danger**` shows its asterisks.
-          literalPrefix: _SourceSlice.generated(callout.title, at),
+          literalPrefix: callout.titleSlice,
         );
       case 'fenced_code_block':
       case 'indented_code_block':
+        // The header is on the screen too — the info string for a fence, the
+        // word `code` for an indented block — and anything counting painted
+        // characters has to count it.
+        final bool indented = node.type == 'indented_code_block';
+        final String language =
+            indented ? 'code' : _codeLanguage(node.raw);
+        final _SourceSlice body = _codeSlice(node.raw, 0, node.type);
         return _BlockProjection(
-          <_SourceSlice>[_codeSlice(node.raw, 0, node.type)],
+          <_SourceSlice>[
+            if (language.isNotEmpty)
+              indented
+                  // Generated: the word is not in the source at all.
+                  ? _SourceSlice.generated(language, 0)
+                  : _normalizedSlice(node.raw, 0)
+                      .splitLines()
+                      .first
+                      .stripLeading(RegExp(r'^\s*(```+|~~~+)\s*'))
+                      .trim(),
+            body,
+          ],
           verbatim: true,
         );
       case 'thematic_break':
@@ -125,20 +139,25 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
   /// `id: body` per definition, the way the definition block paints them.
   _BlockProjection _definitionProjection(MarkdownRenderNode node) {
     final _SourceSlice source = _normalizedSlice(node.raw, 0);
-    final int at = source.offsets.isEmpty ? 0 : source.offsets.first;
     final List<_SourceSlice> pieces = <_SourceSlice>[];
-    int cursor = 0;
     for (final _FootnoteDefinition definition
-        in _parseFootnoteDefinitions(_normalizedRaw(node.raw))) {
-      final _SourceSlice body = source.locate(definition.body, cursor, at);
-      cursor = source.endOf(definition.body, cursor);
-      pieces.add(_SourceSlice.generated('${definition.id}: ', at) + body);
+        in _parseFootnoteDefinitionSlices(source)) {
+      // The label is painted, and the `: ` between it and the body is
+      // generated — but the BODY keeps its own positions, so a range inside
+      // it still lands where it belongs.
+      final int at = definition.bodySlice.offsets.isEmpty
+          ? (source.offsets.isEmpty ? 0 : source.offsets.first)
+          : definition.bodySlice.offsets.first;
+      pieces.add(_definitionLabel(definition.id, at) + definition.bodySlice);
     }
     if (pieces.isEmpty) {
       pieces.add(source.trim());
     }
     return _BlockProjection(pieces);
   }
+
+  _SourceSlice _definitionLabel(String id, int at) =>
+      _SourceSlice.generated('$id: ', at);
 
   /// Cells in render order, split by the SAME function the table widget
   /// splits with, so a cell's position comes from the split rather than from
