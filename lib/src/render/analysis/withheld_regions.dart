@@ -229,6 +229,32 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   for (final MarkdownRenderNode block
       in projections._collectRenderableBlocks(blocks)) {
     if (!_slicesBackOut(source, block)) {
+      // Two different answers, with two different requirements.
+      //
+      // The LEDGER needs to know where each character came from, and for this
+      // block nobody does — so it contributes none.
+      //
+      // The BOUNDARY is a lower bound on what is safe to paint, and leaving a
+      // block out RAISES it. That is the one direction that leaks: an
+      // unfinished destination in a cell of this table would go unseen and the
+      // caller would paint it. A lower bound needs no provenance at all, so it
+      // is taken from the one coordinate this node still has that is true —
+      // where it starts. Everything from here on is withheld.
+      //
+      // Only when something in there COULD have been withheld, though. With
+      // every withholding rule off, the scan would have found nothing to stop
+      // for, so stopping costs a table and everything after it for no reason.
+      //
+      // Both flags, not just the destination one: an unfinished `href` inside
+      // an HTML tag is withheld by `suppressRawHtml` alone
+      // (`text/inline.dart:192`), so a caller who turned destination
+      // withholding off and left raw-HTML suppression on still has a rule that
+      // can fire — and it protects the same kind of secret.
+      final bool anythingCouldBeWithheld =
+          withholdIncompleteDestinations || suppressRawHtml;
+      if (anythingCouldBeWithheld && block.startCodeUnit < safeEnd) {
+        safeEnd = block.startCodeUnit;
+      }
       continue;
     }
 
@@ -459,6 +485,11 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegionsOfSource(
 /// (an image's alt text, a footnote with no definition): say less, never say
 /// something wrong. The coordinates being recoverable at all is a change to
 /// how that node is synthesized, which belongs where it is synthesized.
+///
+/// ⚠️ "Say less" applies to the LEDGER only. Saying less about the BOUNDARY
+/// means claiming MORE is safe to paint, so the caller sees the block instead
+/// of not seeing it — the opposite direction. The caller therefore clamps the
+/// boundary to such a block's start; see the call site.
 ///
 /// Length, not content: every way a node stops slicing back out — the trim
 /// above, CRLF normalization — makes its text SHORTER, and the exact

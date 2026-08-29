@@ -148,6 +148,74 @@ void main() {
       // everywhere it cannot speak for the screen.
       expect(regions.visibleText, isEmpty);
       expect(regions.visibleSourceOffsets, isEmpty);
+
+      // And the boundary stops at the block, rather than staying where it
+      // was. Leaving the block out of the LEDGER says less; leaving it out of
+      // the BOUNDARY says more — see the next test for what that costs.
+      expect(regions.safeEndCodeUnits, 0);
+    });
+
+    test('and an unfinished link inside that table is not declared safe', () {
+      // The half that matters. Omitting a block from the ledger under-counts
+      // the text, which is harmless. Omitting it from the boundary means the
+      // report says "everything up to the end is safe" about a block it never
+      // looked at — and a cell here holds a destination that has not finished
+      // arriving. The caller paints `source.substring(0, safeEndCodeUnits)`,
+      // so a boundary of `source.length` puts that URL on the screen.
+      const String source = '  a | b  \n  c | [x](https://secret.example  ';
+      final int newline = source.indexOf('\n');
+      MarkdownRenderNode row(int start, int end, int line) =>
+          MarkdownRenderNode(
+            type: 'pipe_table_row',
+            depth: 0,
+            startCodeUnit: start,
+            endCodeUnit: end,
+            startRow: line,
+            endRow: line,
+            raw: source.substring(start, end),
+            content: source.substring(start, end),
+          );
+
+      final WithheldMarkdownRegions regions = analyzeWithheldMarkdownRegions(
+        source,
+        blocks: <MarkdownRenderNode>[
+          row(0, newline, 0),
+          row(newline + 1, source.length, 1),
+        ],
+        suppressRawHtml: true,
+      );
+
+      expect(source.substring(0, regions.safeEndCodeUnits),
+          isNot(contains('secret.example')));
+
+      // The same block with destination withholding turned OFF but raw-HTML
+      // suppression left on. That combination still has a rule that withholds
+      // (an unfinished `href` in a tag), so the boundary must still stop —
+      // gating this on the destination flag alone reopens the hole.
+      final WithheldMarkdownRegions htmlOnly = analyzeWithheldMarkdownRegions(
+        source,
+        blocks: <MarkdownRenderNode>[
+          row(0, newline, 0),
+          row(newline + 1, source.length, 1),
+        ],
+        withholdIncompleteDestinations: false,
+        suppressRawHtml: true,
+      );
+      expect(htmlOnly.safeEndCodeUnits, 0);
+
+      // With every withholding rule off there is nothing to protect, so the
+      // report keeps its boundary rather than throwing the rest away.
+      final WithheldMarkdownRegions nothingWithheld =
+          analyzeWithheldMarkdownRegions(
+        source,
+        blocks: <MarkdownRenderNode>[
+          row(0, newline, 0),
+          row(newline + 1, source.length, 1),
+        ],
+        withholdIncompleteDestinations: false,
+        suppressRawHtml: false,
+      );
+      expect(nothingWithheld.safeEndCodeUnits, source.length);
     });
 
     test('a lone CR no longer stops the scan', () {
