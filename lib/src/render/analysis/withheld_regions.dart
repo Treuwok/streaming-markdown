@@ -75,6 +75,30 @@ final class WithheldMarkdownRegions {
 /// changes where a nested scan reports from. Pass the same values the view is
 /// configured with, or the two answers describe different renderings, and
 /// nothing observes the difference.
+///
+/// ## What this describes, exactly
+///
+/// It describes what the DEFAULT rendering of [source] paints. That is less
+/// than "what your widget paints", in two ways that no flag can close, because
+/// this takes a string and the view takes blocks:
+///
+///  * **A `blockBuilder` that replaces text.** The builder can return any
+///    widget for any block; this cannot see it. A builder that only wraps or
+///    decorates the default widget is fine, and so is one that adds chrome —
+///    a typing cursor is not part of the answer's text. A builder that HIDES a
+///    block or paints different words makes this report wrong for that block,
+///    and the caller has to tell it so. [hideLinkReferenceDefinitions] is that
+///    channel for the one case in this repo; there is no general one.
+///  * **Definitions nested inside a container.** This walks the top-level
+///    blocks of its own parse. A footnote definition inside a quote —
+///    `> [^a]: body` — is not found here, while a renderer handed flattened
+///    nodes from the native parser does find it and numbers the reference from
+///    it. The reference then paints `1` and this reports `a`.
+///
+/// Both are the same shape and have the same real fix: be HANDED the blocks
+/// and the builder the renderer got, rather than re-deriving a document from
+/// the source. That is a bigger change than this scan, and it is written down
+/// rather than half-done here.
 WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   String source, {
   bool withholdIncompleteDestinations = true,
