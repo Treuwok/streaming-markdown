@@ -35,26 +35,33 @@ class _ParsedListItem {
 /// a cell's text to learn where it was. [headers] and [rows] are that same
 /// data flattened, which is all most consumers want.
 class _ParsedTable {
-  const _ParsedTable({required this.headerCells, required this.rowCells});
+  _ParsedTable({required this.headerCells, required this.rowCells});
 
   final List<_SourceSlice> headerCells;
   final List<List<_SourceSlice>> rowCells;
 
-  List<String> get headers =>
+  /// ⚠️ `late final`, not a getter, and that is load-bearing.
+  ///
+  /// These were plain fields before the cells carried their origins. As
+  /// getters they rebuilt the whole list on every read — and the table widget
+  /// reads `headers.length` in LOOP CONDITIONS and walks `rows` inside a
+  /// per-column loop, so a linear cost landed inside a quadratic walk. It did
+  /// not fail anything outright; it made timing-sensitive tests start flaking
+  /// under parallel load, which reads like an unlucky machine rather than a
+  /// regression. Computed once.
+  late final List<String> headers =
       headerCells.map((_SourceSlice cell) => cell.text).toList(growable: false);
 
-  List<List<String>> get rows => rowCells
+  late final List<List<String>> rows = rowCells
       .map((List<_SourceSlice> row) =>
           row.map((_SourceSlice cell) => cell.text).toList(growable: false))
       .toList(growable: false);
 
   /// Every cell in the order the table widget paints them.
-  Iterable<_SourceSlice> get cellsInRenderOrder sync* {
-    yield* headerCells;
-    for (final List<_SourceSlice> row in rowCells) {
-      yield* row;
-    }
-  }
+  late final List<_SourceSlice> cellsInRenderOrder = <_SourceSlice>[
+    ...headerCells,
+    for (final List<_SourceSlice> row in rowCells) ...row,
+  ];
 }
 
 class _CalloutData {
