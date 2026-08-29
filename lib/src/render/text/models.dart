@@ -279,3 +279,27 @@ class _InlineToken {
     );
   }
 }
+
+/// The text a block paints, in the pieces the renderer paints them as.
+class _BlockProjection {
+  const _BlockProjection(
+    this.pieces, {
+    this.verbatim = false,
+    this.literalPrefix,
+    this.approximate = false,
+  });
+
+  /// One per separately-rendered run: a list item, a table cell, a definition.
+  final List<_SourceSlice> pieces;
+
+  /// Whether [pieces] are shown as-is rather than inline-parsed. Code blocks
+  /// are, and their edge whitespace is content rather than block syntax.
+  final bool verbatim;
+
+  /// Text drawn by a plain widget before the pieces — a callout's title, which
+  /// shows its own asterisks because nothing parses it.
+  final _SourceSlice? literalPrefix;
+
+  /// The renderer paints something here that this projection cannot describe.
+  final bool approximate;
+}

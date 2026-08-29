@@ -117,7 +117,8 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     }
   }
 
-  final StreamingMarkdownRenderView projections = _projectionsView();
+  final StreamingMarkdownRenderView projections =
+      _projectionsView(suppressRawHtml: suppressRawHtml);
   final List<(int, int)> hidden = <(int, int)>[];
   final List<int> visibleUnits = <int>[];
   final List<int> visibleOffsets = <int>[];
@@ -174,6 +175,13 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     separatorPending = true;
   }
 
+  void keepVerbatimEdges() {
+    // A code block's blank first line is content. `endBlock` strips leading and
+    // trailing newlines because for every OTHER block they are the gap between
+    // blocks; pinning the boundary here keeps it away from this one.
+    blockStart = visibleUnits.length;
+  }
+
   void addUnit(int unit, int sourceOffset) {
     flushSeparator();
     visibleUnits.add(unit);
@@ -195,23 +203,6 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       continue;
     }
 
-    if (_blockHasNoInlineContent(block)) {
-      // Not inline-parsed, but a code block is still text on the screen, and
-      // anything counting painted characters has to count those too. It comes
-      // from the renderer's own extraction — fences and indentation removed
-      // exactly as the renderer removes them, rather than found by searching
-      // the source for the content, which matches the info string first when
-      // a fence's first code line repeats it.
-      if (_isCodeBlock(block)) {
-        final _SourceSlice code =
-            _codeSlice(blockRaw, block.start, _blockTypeOf(block));
-        if (code.text.isNotEmpty) {
-          separateBlocks();
-          addSlice(code);
-        }
-      }
-      continue;
-    }
     if (suppressRawHtml && _isRawTextHtmlBlock(block, source)) {
       // Nothing inside these is prose, so the block parser's extent IS the
       // hidden range — no second scan for where the element ends.
@@ -235,9 +226,28 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     // slice. Scanning the raw slice was why headings kept their `#`, quotes
     // kept their `>` and paragraphs kept hard line breaks the screen folds
     // into spaces: the analysis was answering about a different string.
-    for (final _SourceSlice inline
-        in _inlineSlicesForBlock(block, blockRaw, projections)) {
+    final _BlockProjection projection =
+        projections._projectBlock(_renderNodeFor(blockRaw, _blockTypeOf(block)));
+    final _SourceSlice? literal = projection.literalPrefix;
+    if (literal != null) {
+      // Drawn by a plain widget, so it is never inline-parsed — a custom
+      // callout title shows its own asterisks.
+      separateBlocks();
+      addSlice(_rebase(literal, block.start));
+    }
+
+    for (final _SourceSlice piece in projection.pieces) {
+      final _SourceSlice inline = _rebase(piece, block.start);
       if (inline.isEmpty) {
+        continue;
+      }
+
+      if (projection.verbatim) {
+        // Code. Shown as-is, so its edge whitespace is content rather than
+        // block syntax — the generic trimming must not reach it.
+        separateBlocks();
+        addSlice(inline);
+        keepVerbatimEdges();
         continue;
       }
 
@@ -265,13 +275,23 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
               sourceAt(token.visibleSourceStart + (verbatim ? k : 0)));
         }
       }
-      for (final (int start, int end) range in result.hiddenRanges) {
-        hidden.add((sourceAt(range.$1), sourceAt(range.$2 - 1) + 1));
+      if (inline.located) {
+        for (final (int start, int end) range in result.hiddenRanges) {
+          hidden.add((sourceAt(range.$1), sourceAt(range.$2 - 1) + 1));
+        }
       }
+      // A piece the projection REWROTE has no character-for-character origin,
+      // so every range inside it would be reported at one wrong place. The
+      // suppressed text is already absent from `visibleText`; handing out
+      // coordinates that are wrong would be worse than handing out none,
+      // because a consumer that cuts at them corrupts the text.
       final int? withheldFrom = result.withheldFrom;
       if (withheldFrom != null) {
-        final int boundary =
-            withheldFrom == 0 ? block.start : sourceAt(withheldFrom - 1) + 1;
+        // The piece's own start, not the block's: a list whose SECOND item
+        // holds the unfinished destination must not discard the first.
+        final int boundary = withheldFrom == 0
+            ? (inline.offsets.isEmpty ? block.start : inline.offsets.first)
+            : sourceAt(withheldFrom - 1) + 1;
         if (boundary < safeEnd) {
           safeEnd = boundary;
         }
@@ -381,8 +401,13 @@ String _paintedTextOf(_InlineToken token) {
 /// SAME ones — a second copy of "how a list splits into items" is the thing
 /// this file exists to stop. Constructing one costs nothing; nothing is built.
 /// `debugMarkdownForSelectedPlainText` reaches them the same way.
-StreamingMarkdownRenderView _projectionsView() =>
-    const StreamingMarkdownRenderView(nodes: <MarkdownRenderNode>[]);
+StreamingMarkdownRenderView _projectionsView({required bool suppressRawHtml}) =>
+    StreamingMarkdownRenderView(
+      nodes: const <MarkdownRenderNode>[],
+      // The projection branches on this exactly as the painting does, so the
+      // view has to be configured the way the caller configured the renderer.
+      suppressRawHtml: suppressRawHtml,
+    );
 
 MarkdownRenderNode _renderNodeFor(String raw, String type) =>
     MarkdownRenderNode(
@@ -396,21 +421,14 @@ MarkdownRenderNode _renderNodeFor(String raw, String type) =>
       content: raw,
     );
 
-List<String> _tableCellTexts(
-    StreamingMarkdownRenderView view, String blockRaw) {
-  final _ParsedTable? table = view._parseMarkdownTable(
-    view._normalizedRaw(blockRaw),
-    allowLooseWithoutDelimiter: true,
-    minLooseRowsWithoutDelimiter: 2,
-  );
-  if (table == null) {
-    return const <String>[];
-  }
-  return <String>[
-    ...table.headers,
-    for (final List<String> row in table.rows) ...row,
-  ];
-}
+
+/// The projection is computed against the block's own slice, so its offsets
+/// start at zero. Shift them to where the block sits in the document.
+_SourceSlice _rebase(_SourceSlice slice, int blockStart) => _SourceSlice(
+      slice.text,
+      slice.offsets.map((int at) => at + blockStart).toList(growable: false),
+      located: slice.located,
+    );
 
 String _blockTypeOf(MarkdownBlockNode block) {
   if (block is CodeFenceNode) {
@@ -425,80 +443,4 @@ String _blockTypeOf(MarkdownBlockNode block) {
   return block is GenericBlockNode ? block.type : '';
 }
 
-bool _isCodeBlock(MarkdownBlockNode block) =>
-    block is CodeFenceNode ||
-    (block is GenericBlockNode && block.type == 'indented_code_block');
 
-/// The string this block's inline content is parsed from, with origins.
-///
-/// One function, and the renderer's own extraction behind every branch — so
-/// "which part of this block is inline text" has one answer instead of one per
-/// consumer.
-List<_SourceSlice> _inlineSlicesForBlock(
-  MarkdownBlockNode block,
-  String blockRaw,
-  StreamingMarkdownRenderView projections,
-) {
-  final String type = _blockTypeOf(block);
-  switch (type) {
-    case 'atx_heading':
-    case 'setext_heading':
-      return <_SourceSlice>[_headingSlice(blockRaw, block.start, type)];
-    case 'block_quote':
-      final _SourceSlice quote = _quoteSlice(blockRaw, block.start);
-      final _CalloutData? callout = projections._parseCallout(quote.text);
-      if (callout == null) {
-        return <_SourceSlice>[quote];
-      }
-      // The title is generated (`[!NOTE]` becomes `Note`), so it reports the
-      // marker it replaced rather than pretending to be a slice of it.
-      final int at = quote.offsets.isEmpty ? block.start : quote.offsets.first;
-      return <_SourceSlice>[
-        _SourceSlice(callout.title, List<int>.filled(callout.title.length, at)),
-        quote.locate(callout.body, 0, at),
-      ];
-    case 'list':
-    case 'list_item':
-      return _orderedSlices(
-        _normalizedSlice(blockRaw, block.start),
-        projections
-            ._parseListNode(_renderNodeFor(blockRaw, type))
-            .items
-            .map((_ParsedListItem item) => item.text)
-            .toList(growable: false),
-      );
-    case 'pipe_table':
-    case 'table':
-    case 'pipe_table_header':
-    case 'pipe_table_row':
-      return _orderedSlices(
-        _normalizedSlice(blockRaw, block.start),
-        _tableCellTexts(projections, blockRaw),
-      );
-    default:
-      return <_SourceSlice>[
-        _paragraphSlice(
-          blockRaw,
-          block.start,
-          block is GenericBlockNode ? block.content : '',
-        ).newlinesAsSpaces(),
-      ];
-  }
-}
-
-/// Blocks whose text is never inline-parsed, so nothing in them can leak.
-///
-/// Hiding a URL that a code fence is deliberately showing would be the
-/// over-hiding failure — the one that looks like success in a leak test.
-bool _blockHasNoInlineContent(MarkdownBlockNode block) {
-  if (block is CodeFenceNode) {
-    return true;
-  }
-  return block is GenericBlockNode &&
-      (block.type == 'indented_code_block' ||
-          // Paints a rule and a nothing respectively — no text either way, so
-          // treating their source as inline content credited `***` and a
-          // table's `|---|` as characters a reader could see.
-          block.type == 'thematic_break' ||
-          block.type == 'pipe_table_delimiter_row');
-}

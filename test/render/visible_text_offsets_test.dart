@@ -206,4 +206,53 @@ void main() {
     expect(_scan('before ![cat](https://example.test/c.png) after').visibleText,
         'before  after');
   });
+
+  group('the projection is the renderer\'s, for every block type (codex R3)',
+      () {
+    const Map<String, String> cases = <String, String>{
+      // A definition block paints `id: body`; the identifier is visible.
+      '[^a]: the note': 'a: the note',
+      // Front matter keeps its line breaks — no paragraph folding.
+      '---\ntitle: value\n---': '---\ntitle: value\n---',
+      // A custom callout title is drawn by a plain widget, so its asterisks
+      // are on the screen.
+      '> [!WARNING] **Danger**\n> body': '**Danger**\nbody',
+    };
+    cases.forEach((String source, String expected) {
+      test(source.split('\n').join('|'),
+          () => expect(_scan(source).visibleText, expected));
+    });
+
+    test('a code body keeps its leading blank line', () {
+      // Verbatim: the blank first line is content, not the gap between blocks.
+      expect(_scan('```\n\ncode\n```').visibleText, '\ncode');
+    });
+
+    test('an unfinished destination in a later item keeps the earlier one', () {
+      // The boundary is the PIECE's start, not the block's — otherwise the
+      // first item is discarded along with the second.
+      final WithheldMarkdownRegions r = analyzeWithheldMarkdownRegions(
+        '- first\n- [link](https://unfinished',
+        suppressRawHtml: true,
+      );
+      expect(r.visibleText, contains('first'));
+      expect(r.visibleText, isNot(contains('unfinished')));
+    });
+  });
+
+  test('a rewritten cell reports no ranges rather than wrong ones', () {
+    // Table parsing turns `\\|` into `|`, so the cell is not a slice of the
+    // source and nothing inside it has a real position. The suppressed tag is
+    // absent from the visible text either way; what must NOT happen is a range
+    // pointing somewhere else, which a consumer would cut at.
+    const String source =
+        '| a \\| <a href="https://secret.example">x</a> | b |\n'
+        '| --- | --- |\n| c | d |';
+    final WithheldMarkdownRegions r = _scan(source);
+    expect(r.visibleText, isNot(contains('secret.example')));
+    for (final (int, int) range in r.hiddenCodeUnitRanges) {
+      expect(source.substring(range.$1, range.$2), isNot(contains('a href')),
+          reason: 'a range here would be at the wrong place');
+    }
+  });
 }

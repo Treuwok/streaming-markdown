@@ -15,7 +15,7 @@ part of '../view.dart';
 /// which is ambiguous exactly when the text also occurs somewhere it did not
 /// come from.
 final class _SourceSlice {
-  const _SourceSlice(this.text, this.offsets);
+  const _SourceSlice(this.text, this.offsets, {this.located = true});
 
   /// The whole of [text] starting at [start] in the source.
   factory _SourceSlice.whole(String text, int start) => _SourceSlice(
@@ -30,6 +30,15 @@ final class _SourceSlice {
   /// Source offset of each code unit of [text]. Same length as [text].
   final List<int> offsets;
 
+  /// False when [offsets] are a fallback rather than real positions.
+  ///
+  /// A projection that REWRITES rather than deletes — a table cell whose
+  /// `\\|` became `|` — has no character-for-character origin, so the whole
+  /// run points at one place. Reporting hidden RANGES from such a piece would
+  /// hand a consumer coordinates that are wrong, and a consumer that cuts text
+  /// at wrong coordinates corrupts it. Callers check this instead.
+  final bool located;
+
   bool get isEmpty => text.isEmpty;
 
   /// Source offset just past the last surviving character, or -1 when empty.
@@ -38,6 +47,7 @@ final class _SourceSlice {
   _SourceSlice _range(int start, int end) => _SourceSlice(
         text.substring(start, end),
         offsets.sublist(start, end),
+        located: located,
       );
 
   _SourceSlice withoutCarriageReturns() {
@@ -101,8 +111,24 @@ final class _SourceSlice {
     if (!text.contains('\n')) {
       return this;
     }
-    return _SourceSlice(text.replaceAll('\n', ' '), offsets);
+    return _SourceSlice(text.replaceAll('\n', ' '), offsets, located: located);
   }
+
+  /// This slice followed by [other].
+  _SourceSlice operator +(_SourceSlice other) => _SourceSlice(
+        text + other.text,
+        <int>[...offsets, ...other.offsets],
+        located: located && other.located,
+      );
+
+  /// Literal text with no source of its own, pinned to [at].
+  ///
+  /// For characters the renderer GENERATES — a callout's `Note`, the `: `
+  /// between a footnote's id and its body. They are on the screen, so they
+  /// must be counted, and they point at the construct that produced them
+  /// because there is nothing truer to point at.
+  static _SourceSlice generated(String text, int at) =>
+      _SourceSlice(text, List<int>.filled(text.length, at), located: false);
 
   /// Drops the trailing characters [pattern] matches at the end of [text].
   _SourceSlice stripTrailing(RegExp pattern) {
@@ -137,6 +163,7 @@ final class _SourceSlice {
       return _SourceSlice(
         needle,
         List<int>.filled(needle.length, fallbackOffset),
+        located: false,
       );
     }
     return _range(at, at + needle.length);
