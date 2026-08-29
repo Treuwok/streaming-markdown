@@ -29,7 +29,7 @@ void main() {
       '<div>\nImportant answer\n</div>': ' Important answer ',
       'see `code` here': 'see code here',
       'para one\n\npara two': 'para one\npara two',
-      '```\nlet x = 1\n```': 'let x = 1',
+      '```\nlet x = 1\n```': 'let\nlet x = 1',
     };
 
     cases.forEach((String source, String expected) {
@@ -129,7 +129,10 @@ void main() {
       'first line\nsecond line': 'first line second line',
       // header + body: the info string is painted above the code.
       '```dart\ndart\n```': 'dart\ndart',
-      '```\ncode   \n```': 'code',
+      // NOTE: a fence with no info string takes the body's first word as its
+      // language and paints it as the header — a renderer quirk this report
+      // faithfully reproduces rather than papers over.
+      '```\ncode   \n```': 'code\ncode',
     };
     cases.forEach((String source, String expected) {
       test(source.split('\n').join('|'),
@@ -226,7 +229,7 @@ void main() {
 
     test('a code body keeps its leading blank line', () {
       // Verbatim: the blank first line is content, not the gap between blocks.
-      expect(_scan('```\n\ncode\n```').visibleText, '\ncode');
+      expect(_scan('```\n\ncode\n```').visibleText, 'code\n\ncode');
     });
 
     test('an unfinished destination in a later item keeps the earlier one', () {
@@ -277,5 +280,39 @@ void main() {
     expect(r.visibleText, 'note: note');
     // The label is generated; the body points at the real body.
     expect(r.visibleSourceOffsets.last, '[^note]: not'.length);
+  });
+
+  test('a hidden definition still resolves its references (codex R5)', () {
+    // The flag means the block is not DRAWN, not that it is gone: the mobile
+    // adapter keeps those nodes in the list it hands the renderer precisely so
+    // references resolve, and only suppresses their own rendering.
+    expect(
+      analyzeWithheldMarkdownRegions(
+        'see [help][ref]\n\n[ref]: https://example.test',
+        sourceComplete: true,
+        hideLinkReferenceDefinitions: true,
+      ).visibleText,
+      'see help',
+    );
+  });
+
+  test('a continuation line keeps the item traceable (codex R5)', () {
+    // The joining space IS the line break it replaced, so the item stays
+    // traceable end to end. A position-less space used to cost the whole item
+    // every hidden range in it.
+    const String source = '- first\n  <a href="https://secret.example">x</a>';
+    final WithheldMarkdownRegions r = _scan(source);
+    expect(r.visibleText, 'first\nx');
+    expect(
+      r.hiddenCodeUnitRanges
+          .map(((int, int) g) => source.substring(g.$1, g.$2))
+          .toList(),
+      <String>['<a href="https://secret.example">', '</a>'],
+    );
+  });
+
+  test('a code header is only the language token (codex R5)', () {
+    // ` ```dart linenums ` paints `dart`, not the whole info string.
+    expect(_scan('```dart linenums\nx\n```').visibleText, 'dart\nx');
   });
 }

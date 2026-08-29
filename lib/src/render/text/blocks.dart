@@ -27,10 +27,12 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
               ordered: last.ordered,
               order: last.order,
               taskState: last.taskState,
-              // The joining space is generated; it reports the end of the
-              // line it follows.
+              // The joining space IS the line break it replaced, painted
+              // differently — same as a paragraph's folded newline. Giving it
+              // that position keeps the whole body traceable, where a
+              // position-less space used to cost the item every range in it.
               body: last.body +
-                  _SourceSlice.generated(' ', last.body.sourceEnd) +
+                  _SourceSlice.whole(' ', last.body.sourceEnd) +
                   line.trim(),
               stableKey: last.stableKey,
             ),

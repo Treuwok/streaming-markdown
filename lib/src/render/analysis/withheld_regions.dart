@@ -59,11 +59,15 @@ final class WithheldMarkdownRegions {
 /// coordinates depend on which parser the caller happened to use. Everything
 /// here is measured in one unit against one string.
 ///
-/// [hideLinkReferenceDefinitions] is for callers that drop those blocks before
-/// handing them to the renderer, as the mobile adapter does. The block IS
-/// painted by the default renderer, so the analysis cannot decide this on its
-/// own — a caller that removes it and does not say so gets a report describing
-/// text that is not on its screen.
+/// [hideLinkReferenceDefinitions] says the caller suppresses the DRAWING of
+/// those blocks while still handing them to the renderer — what the mobile
+/// adapter does, so its references keep resolving while the definition itself
+/// stays off the screen.
+///
+/// It therefore removes the block from the projection and NOT from the
+/// reference map. The default renderer draws the block, so the analysis cannot
+/// decide this on its own; a caller that hides it and does not say so gets a
+/// report describing text that is not on its screen.
 ///
 /// Every other flag here means exactly what it means on
 /// [StreamingMarkdownRenderView] — including
@@ -275,16 +279,22 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
               sourceAt(token.visibleSourceStart + (verbatim ? k : 0)));
         }
       }
-      if (inline.located) {
-        for (final (int start, int end) range in result.hiddenRanges) {
-          hidden.add((sourceAt(range.$1), sourceAt(range.$2 - 1) + 1));
+      for (final (int start, int end) range in result.hiddenRanges) {
+        // Trustworthy exactly when this range's characters came from
+        // consecutive source positions. Generated text — a joining space, a
+        // label — reports one position for its whole run, so a range over it
+        // is not a range in the source and is dropped rather than reported
+        // somewhere wrong: a consumer that cuts at wrong coordinates corrupts
+        // the text, which is worse than cutting at none.
+        //
+        // Derived from the offsets themselves, so it needs no second piece of
+        // state to keep in step, and it is per-RANGE where a per-slice flag
+        // threw away every range in a piece for one generated character in it.
+        if (!_contiguous(inline.offsets, range.$1, range.$2)) {
+          continue;
         }
+        hidden.add((sourceAt(range.$1), sourceAt(range.$2 - 1) + 1));
       }
-      // A piece the projection REWROTE has no character-for-character origin,
-      // so every range inside it would be reported at one wrong place. The
-      // suppressed text is already absent from `visibleText`; handing out
-      // coordinates that are wrong would be worse than handing out none,
-      // because a consumer that cuts at them corrupts the text.
       final int? withheldFrom = result.withheldFrom;
       if (withheldFrom != null) {
         // The piece's own start, not the block's: a list whose SECOND item
@@ -429,6 +439,19 @@ _SourceSlice _rebase(_SourceSlice slice, int blockStart) => _SourceSlice(
       slice.offsets.map((int at) => at + blockStart).toList(growable: false),
       located: slice.located,
     );
+
+/// Whether `offsets[start..end)` step through the source one at a time.
+bool _contiguous(List<int> offsets, int start, int end) {
+  if (start < 0 || end > offsets.length || start >= end) {
+    return false;
+  }
+  for (int i = start + 1; i < end; i++) {
+    if (offsets[i] != offsets[i - 1] + 1) {
+      return false;
+    }
+  }
+  return true;
+}
 
 String _blockTypeOf(MarkdownBlockNode block) {
   if (block is CodeFenceNode) {

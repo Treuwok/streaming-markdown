@@ -90,11 +90,10 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
               indented
                   // Generated: the word is not in the source at all.
                   ? _SourceSlice.generated(language, 0)
-                  : _normalizedSlice(node.raw, 0)
-                      .splitLines()
-                      .first
-                      .stripLeading(RegExp(r'^\s*(```+|~~~+)\s*'))
-                      .trim(),
+                  // Exactly the token `_codeLanguage` picked. An info string
+                  // can carry more (` ```dart linenums `) and the header
+                  // paints only the language.
+                  : _languageSlice(node.raw, language),
             body,
           ],
           verbatim: true,
@@ -154,6 +153,26 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
       pieces.add(source.trim());
     }
     return _BlockProjection(pieces);
+  }
+
+  /// The span `_codeLanguage` picked, found by the same match rather than by
+  /// searching for the text afterwards.
+  ///
+  /// ⚠️ That pattern's `\s*` crosses the line break, so a fence with NO info
+  /// string takes the first word of the BODY as its language — and the header
+  /// paints it. This reports what is painted; the quirk itself belongs to the
+  /// renderer and is left alone here.
+  _SourceSlice _languageSlice(String raw, String language) {
+    final _SourceSlice normalized = _normalizedSlice(raw, 0);
+    final RegExpMatch? match = RegExp(
+      r'^\s*(```+|~~~+)\s*([A-Za-z0-9_+\-\.#]*)',
+      multiLine: true,
+    ).firstMatch(normalized.text);
+    if (match == null || match.group(2)!.isEmpty) {
+      return _SourceSlice.generated(language, 0);
+    }
+    final int end = match.end;
+    return normalized.sub(end - match.group(2)!.length, end);
   }
 
   _SourceSlice _definitionLabel(String id, int at) =>
