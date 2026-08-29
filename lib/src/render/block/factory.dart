@@ -45,8 +45,8 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
     switch (node.type) {
       case 'atx_heading':
       case 'setext_heading':
-        return _BlockProjection(<_SourceSlice>[
-          _headingSlice(node.raw, 0, node.type),
+        return _BlockProjection(<_ProjectedPiece>[
+          _ProjectedPiece(_headingSlice(node.raw, 0, node.type)),
         ]);
       case 'paragraph':
         final String normalizedRaw = _normalizedRaw(node.raw);
@@ -56,25 +56,25 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
         if (_tableCellsOrNull(normalizedRaw) != null) {
           return _BlockProjection(_tableCellSlices(node));
         }
-        return _BlockProjection(<_SourceSlice>[paragraph]);
+        return _BlockProjection(<_ProjectedPiece>[_ProjectedPiece(paragraph)]);
       case 'list':
       case 'list_item':
         return _BlockProjection(_parseListNode(node)
             .items
-            .map((_ParsedListItem item) => item.body)
+            .map((_ParsedListItem item) => _ProjectedPiece(item.body))
             .toList(growable: false));
       case 'block_quote':
         final _SourceSlice quote = _quoteSlice(node.raw, 0);
         final _CalloutData? callout = _parseCallout(quote.text);
         if (callout == null) {
-          return _BlockProjection(<_SourceSlice>[quote]);
+          return _BlockProjection(<_ProjectedPiece>[_ProjectedPiece(quote)]);
         }
-        return _BlockProjection(
-          <_SourceSlice>[callout.bodySlice],
+        return _BlockProjection(<_ProjectedPiece>[
           // The title is drawn by a plain `Text`, so it is literal — a custom
           // title like `**Danger**` shows its asterisks.
-          literalPrefix: callout.titleSlice,
-        );
+          _ProjectedPiece(callout.titleSlice, literal: true),
+          _ProjectedPiece(callout.bodySlice),
+        ]);
       case 'fenced_code_block':
       case 'indented_code_block':
         // The header is on the screen too — the info string for a fence, the
@@ -85,62 +85,63 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
             indented ? 'code' : _codeLanguage(node.raw);
         final _SourceSlice body = _codeSlice(node.raw, 0, node.type);
         return _BlockProjection(
-          <_SourceSlice>[
+          <_ProjectedPiece>[
             // The code widget returns early on an empty body, before it paints
             // its header — so an empty fence with a language shows nothing.
             if (language.isNotEmpty && body.text.isNotEmpty)
+              _ProjectedPiece(
               indented
                   // Generated: the word is not in the source at all.
                   ? _SourceSlice.generated(language, 0)
                   // Exactly the token `_codeLanguage` picked. An info string
                   // can carry more (` ```dart linenums `) and the header
                   // paints only the language.
-                  : _languageSlice(node.raw, language),
-            body,
+                  : _languageSlice(node.raw, language)),
+            _ProjectedPiece(body),
           ],
           verbatim: true,
         );
       case 'thematic_break':
       case 'pipe_table_delimiter_row':
-        return const _BlockProjection(<_SourceSlice>[]);
+        return const _BlockProjection(<_ProjectedPiece>[]);
       case 'pipe_table':
       case 'table':
       case 'pipe_table_header':
       case 'pipe_table_row':
-        final List<_SourceSlice> cells = _tableCellSlices(node);
+        final List<_ProjectedPiece> cells = _tableCellSlices(node);
         return _BlockProjection(cells.isEmpty
-            ? <_SourceSlice>[_contentOrRawSlice(node)]
+            ? <_ProjectedPiece>[_ProjectedPiece(_contentOrRawSlice(node))]
             : cells);
       case 'html_block':
         if (suppressRawHtml) {
           if (_isRawTextHtmlOpening(node.raw)) {
-            return const _BlockProjection(<_SourceSlice>[]);
+            return const _BlockProjection(<_ProjectedPiece>[]);
           }
-          return _BlockProjection(<_SourceSlice>[paragraph]);
+          return _BlockProjection(<_ProjectedPiece>[_ProjectedPiece(paragraph)]);
         }
         // Not suppressed: an `_HtmlBlockCard` parses the HTML and paints only
         // its DOM text. Projecting that is a third derivation of "what does
         // this HTML show", so it is deliberately not attempted here — the
         // configuration has no consumer today, and the report says so.
-        return const _BlockProjection(<_SourceSlice>[], approximate: true);
+        return const _BlockProjection(<_ProjectedPiece>[], approximate: true);
       case 'front_matter':
         // A metadata block hands its normalized text straight to the inline
         // renderer, keeping the line breaks. No paragraph folding.
-        return _BlockProjection(<_SourceSlice>[
-          _normalizedSlice(node.raw, 0).trim(),
+        return _BlockProjection(<_ProjectedPiece>[
+          _ProjectedPiece(_normalizedSlice(node.raw, 0).trim()),
         ]);
       case 'link_reference_definition':
       case 'footnote_definition':
         return _definitionProjection(node);
       default:
-        return _BlockProjection(<_SourceSlice>[paragraph]);
+        return _BlockProjection(<_ProjectedPiece>[_ProjectedPiece(paragraph)]);
     }
   }
 
   /// `id: body` per definition, the way the definition block paints them.
   _BlockProjection _definitionProjection(MarkdownRenderNode node) {
     final _SourceSlice source = _normalizedSlice(node.raw, 0);
-    final List<_SourceSlice> pieces = <_SourceSlice>[];
+    final List<_ProjectedPiece> pieces = <_ProjectedPiece>[];
     for (final _FootnoteDefinition definition
         in _parseFootnoteDefinitionSlices(source)) {
       // The label is painted, and the `: ` between it and the body is
@@ -149,10 +150,14 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
       final int at = definition.bodySlice.offsets.isEmpty
           ? (source.offsets.isEmpty ? 0 : source.offsets.first)
           : definition.bodySlice.offsets.first;
-      pieces.add(_definitionLabel(definition.id, at) + definition.bodySlice);
+      // The label is drawn by a plain `Text`, so an id like `*note*` keeps
+      // its asterisks and cannot pair delimiters with the body beside it.
+      pieces.add(_ProjectedPiece(_definitionLabel(definition.id, at),
+          literal: true));
+      pieces.add(_ProjectedPiece(definition.bodySlice, continuesLine: true));
     }
     if (pieces.isEmpty) {
-      pieces.add(source.trim());
+      pieces.add(_ProjectedPiece(source.trim()));
     }
     return _BlockProjection(pieces);
   }
@@ -183,8 +188,8 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
   /// Cells in render order, split by the SAME function the table widget
   /// splits with, so a cell's position comes from the split rather than from
   /// searching the block for its text afterwards.
-  List<_SourceSlice> _tableCellSlices(MarkdownRenderNode node) {
-    final List<_SourceSlice> cells = <_SourceSlice>[];
+  List<_ProjectedPiece> _tableCellSlices(MarkdownRenderNode node) {
+    final List<_ProjectedPiece> cells = <_ProjectedPiece>[];
     for (final _SourceSlice line in _normalizedSlice(node.raw, 0).splitLines()) {
       final String trimmed = line.text.trim();
       if (trimmed.isEmpty || !trimmed.contains('|')) {
@@ -194,7 +199,8 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
         continue; // the delimiter row paints nothing
       }
       cells.addAll(_splitTableRowSlices(line)
-          .where((_SourceSlice cell) => cell.text.isNotEmpty));
+          .where((_SourceSlice cell) => cell.text.isNotEmpty)
+          .map(_ProjectedPiece.new));
     }
     return cells;
   }

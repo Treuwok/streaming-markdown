@@ -328,4 +328,31 @@ void main() {
     // The code widget returns early on an empty body, before its header.
     expect(_scan('```dart\n```').visibleText, isEmpty);
   });
+
+  test('a footnote label with delimiters stays literal (codex R7)', () {
+    // Drawn by a plain widget, so `*note*` keeps its asterisks and cannot
+    // pair delimiters with the body beside it.
+    expect(_scan('[^*note*]: body').visibleText, '*note*: body');
+  });
+
+  test('suppression leaving only syntax still paints it (codex R7)', () {
+    // The renderer's own fallback: no tokens but source left over, so it
+    // paints what survived rather than nothing.
+    expect(_scan('**<b></b>**').visibleText, '****');
+  });
+
+  test('a tag spanning CRLF keeps its range (codex R7)', () {
+    // Normalization drops the `\r`, so the tag's surviving offsets jump one.
+    // Requiring +1 rejected the range and the URL went unreported.
+    const String source = '<a\r\n href="https://secret.example">x</a>';
+    final WithheldMarkdownRegions r = _scan(source);
+    expect(r.visibleText, 'x');
+    expect(
+      r.hiddenCodeUnitRanges.length,
+      2,
+      reason: 'the opening tag and the closing one',
+    );
+    expect(source.substring(r.hiddenCodeUnitRanges.first.$1,
+        r.hiddenCodeUnitRanges.first.$2), contains('secret.example'));
+  });
 }

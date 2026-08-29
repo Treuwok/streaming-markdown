@@ -296,25 +296,42 @@ class _InlineToken {
   }
 }
 
+/// One separately-rendered run of a block, and how it is drawn.
+class _ProjectedPiece {
+  const _ProjectedPiece(
+    this.slice, {
+    this.literal = false,
+    this.continuesLine = false,
+  });
+
+  final _SourceSlice slice;
+
+  /// Drawn by a plain widget rather than inline-parsed — a callout's title, a
+  /// footnote definition's label. Its own delimiters are on the screen, so
+  /// scanning it would report `note` where `*note*` is painted, and could pair
+  /// delimiters across the boundary with the run beside it.
+  final bool literal;
+
+  /// Whether this run sits on the SAME line as the one before it. A footnote
+  /// definition's label and its body share a line; a callout's title is a row
+  /// of its own above the body.
+  final bool continuesLine;
+}
+
 /// The text a block paints, in the pieces the renderer paints them as.
 class _BlockProjection {
   const _BlockProjection(
     this.pieces, {
     this.verbatim = false,
-    this.literalPrefix,
     this.approximate = false,
   });
 
   /// One per separately-rendered run: a list item, a table cell, a definition.
-  final List<_SourceSlice> pieces;
+  final List<_ProjectedPiece> pieces;
 
   /// Whether [pieces] are shown as-is rather than inline-parsed. Code blocks
   /// are, and their edge whitespace is content rather than block syntax.
   final bool verbatim;
-
-  /// Text drawn by a plain widget before the pieces — a callout's title, which
-  /// shows its own asterisks because nothing parses it.
-  final _SourceSlice? literalPrefix;
 
   /// The renderer paints something here that this projection cannot describe.
   final bool approximate;

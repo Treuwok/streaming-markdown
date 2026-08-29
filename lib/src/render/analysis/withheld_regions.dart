@@ -249,16 +249,23 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     // into spaces: the analysis was answering about a different string.
     final _BlockProjection projection =
         projections._projectBlock(_renderNodeFor(blockRaw, _blockTypeOf(block)));
-    final _SourceSlice? literal = projection.literalPrefix;
-    if (literal != null) {
-      // Drawn by a plain widget, so it is never inline-parsed — a custom
-      // callout title shows its own asterisks.
-      separateBlocks();
-      addSlice(_rebase(literal, block.start));
-    }
+    for (final _ProjectedPiece projected in projection.pieces) {
+      final _SourceSlice inline = _rebase(projected.slice, block.start);
+      void beginPiece() {
+        if (!projected.continuesLine) {
+          separateBlocks();
+        }
+      }
 
-    for (final _SourceSlice piece in projection.pieces) {
-      final _SourceSlice inline = _rebase(piece, block.start);
+      if (projected.literal) {
+        // Drawn by a plain widget, so it is never inline-parsed: its own
+        // delimiters are on the screen.
+        if (inline.text.isNotEmpty) {
+          beginPiece();
+          addSlice(inline);
+        }
+        continue;
+      }
       if (inline.isEmpty) {
         continue;
       }
@@ -266,13 +273,30 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       if (projection.verbatim) {
         // Code. Shown as-is, so its edge whitespace is content rather than
         // block syntax — the generic trimming must not reach it.
-        separateBlocks();
+        beginPiece();
         addSlice(inline);
         keepVerbatimEdges();
         continue;
       }
 
       final _InlineParseResult result = parser.scan(inline.text);
+
+      // The renderer's own fallback: with no tokens but source left over, it
+      // paints what survived suppression rather than nothing — `**<b></b>**`
+      // shows its asterisks. Mirroring it here keeps the two answers the same.
+      //
+      // It must NOT skip the range reporting below. Doing that left a comment
+      // block — every character of it suppressed, so no tokens — reporting no
+      // hidden ranges at all.
+      final bool emptyTokens = result.tokens.isEmpty;
+      if (emptyTokens) {
+        final _SourceSlice survivors =
+            _survivingSlice(inline, result.hiddenRanges, result.withheldFrom);
+        if (survivors.text.isNotEmpty) {
+          beginPiece();
+          addSlice(survivors);
+        }
+      }
 
       // Offsets are into `inline.text`; the slice says where each of those
       // characters lives in the document.
@@ -282,7 +306,9 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
 
       // Each piece is its own line on screen — a list item, a table cell, a
       // callout title above its body — so each gets its own separator.
-      separateBlocks();
+      if (!emptyTokens) {
+        beginPiece();
+      }
       for (final _InlineToken token in result.tokens) {
         final String painted = _paintedTextOf(token, footnoteNumbers);
         if (painted.isEmpty) {
@@ -297,17 +323,17 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
         }
       }
       for (final (int start, int end) range in result.hiddenRanges) {
-        // Trustworthy exactly when this range's characters came from
-        // consecutive source positions. Generated text — a joining space, a
-        // label — reports one position for its whole run, so a range over it
-        // is not a range in the source and is dropped rather than reported
-        // somewhere wrong: a consumer that cuts at wrong coordinates corrupts
-        // the text, which is worse than cutting at none.
+        // Trustworthy exactly when this range's characters advance through
+        // the source. Generated text — a joining space, a label — reports one
+        // position for its whole run, so a range over it is not a range in
+        // the source and is dropped rather than reported somewhere wrong: a
+        // consumer that cuts at wrong coordinates corrupts the text, which is
+        // worse than cutting at none.
         //
         // Derived from the offsets themselves, so it needs no second piece of
         // state to keep in step, and it is per-RANGE where a per-slice flag
         // threw away every range in a piece for one generated character in it.
-        if (!_contiguous(inline.offsets, range.$1, range.$2)) {
+        if (!_monotonic(inline.offsets, range.$1, range.$2)) {
           continue;
         }
         hidden.add((sourceAt(range.$1), sourceAt(range.$2 - 1) + 1));
@@ -462,13 +488,54 @@ _SourceSlice _rebase(_SourceSlice slice, int blockStart) => _SourceSlice(
       located: slice.located,
     );
 
-/// Whether `offsets[start..end)` step through the source one at a time.
-bool _contiguous(List<int> offsets, int start, int end) {
+/// What survives suppression when the scan produced no tokens.
+///
+/// The same characters `_InlineParseResult.visibleSourceOf` gives the
+/// renderer, kept as a slice so they still say where they came from.
+_SourceSlice _survivingSlice(
+  _SourceSlice piece,
+  List<(int, int)> hiddenRanges,
+  int? withheldFrom,
+) {
+  final int end = withheldFrom ?? piece.text.length;
+  final StringBuffer text = StringBuffer();
+  final List<int> offsets = <int>[];
+  int cursor = 0;
+  void take(int from, int to) {
+    for (int i = from; i < to && i < piece.text.length; i++) {
+      text.writeCharCode(piece.text.codeUnitAt(i));
+      offsets.add(piece.offsets[i]);
+    }
+  }
+
+  for (final (int start, int stop) range in hiddenRanges) {
+    if (range.$1 >= end) {
+      break;
+    }
+    if (range.$1 > cursor) {
+      take(cursor, range.$1);
+    }
+    cursor = range.$2 > cursor ? range.$2 : cursor;
+  }
+  if (cursor < end) {
+    take(cursor, end);
+  }
+  return _SourceSlice(text.toString(), offsets);
+}
+
+/// Whether `offsets[start..end)` advance through the source.
+///
+/// STRICTLY increasing, not "differ by exactly one". A deletion leaves a gap —
+/// normalization drops the `\r` of a CRLF, and a tag spanning one is still a
+/// single run of source — while GENERATED text repeats one position for its
+/// whole run. Requiring +1 rejected the first along with the second, and the
+/// suppressed tag's range went unreported.
+bool _monotonic(List<int> offsets, int start, int end) {
   if (start < 0 || end > offsets.length || start >= end) {
     return false;
   }
   for (int i = start + 1; i < end; i++) {
-    if (offsets[i] != offsets[i - 1] + 1) {
+    if (offsets[i] <= offsets[i - 1]) {
       return false;
     }
   }
