@@ -132,9 +132,9 @@ void main() {
       'first line\nsecond line': 'first line second line',
       // header + body: the info string is painted above the code.
       '```dart\ndart\n```': 'dart\ndart',
-      // NOTE: a fence with no info string takes the body's first word as its
-      // language and paints it as the header — a renderer quirk this report
-      // faithfully reproduces rather than papers over.
+      // No info string, so no header — this is the BODY. It used to be
+      // `code\ncode`, because the language pattern ran past the opening line
+      // and labelled the block with the first word of its own body.
       '```\ncode   \n```': 'code',
     };
     cases.forEach((String source, String expected) {

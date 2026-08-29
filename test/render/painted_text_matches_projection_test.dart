@@ -132,6 +132,23 @@ void main() {
     (r'a display formula on its own', r'$$x + 1$$'),
     (r'a formula inside a sentence', r'see $x + 1$ there'),
 
+    // ---- constructs that until now only had a hand-written expectation ----
+    // Moved here after three such expectations turned out to assert a bug:
+    // they were written next to the code that produced them, so both were
+    // wrong together and green together.
+    ('a thematic break paints no text', '***'),
+    ('a multi-line quote', '> line one\n> line two'),
+    ('ATX closing hashes are syntax', '# Title #'),
+    ('an ordered list', '1. first\n2. second'),
+    ('a link reference definition is drawn', '[ref]: https://example.test'),
+    ('a textless block between two paragraphs',
+        'first\n\n<div></div>\n\nlast'),
+    ('non-breaking space is whitespace', '\u00a0text\u00a0'),
+    ('an inline image contributes no characters',
+        'before ![cat](https://example.test/c.png) after'),
+    ('an escaped pipe survives in a cell',
+        '| a \\| b |\n| --- | --- |\n| c | d |'),
+
     // ---- ordinary prose, as the control ----
     ('headings and paragraphs', '# Title\n\nsome **bold** prose'),
     ('a paragraph folds its line breaks', 'first line\nsecond line'),
