@@ -139,7 +139,40 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   final List<int> visibleUnits = <int>[];
   final List<int> visibleOffsets = <int>[];
 
-  int safeEnd = source.length;
+  // A lone CR — one not followed by LF — is a line ending in CommonMark and is
+  // not one to this parser, which splits on LF alone. Everything after it is
+  // therefore being read under a grammar the spec does not agree with: an
+  // unclosed fence swallows the rest of the message and paints it verbatim,
+  // URL included, where a CR-aware reading would have closed the fence.
+  //
+  // The report does not vouch for text it read under the wrong grammar, so the
+  // boundary stops there.
+  //
+  // ⚠️ This was removed in #5 and put back. It used to sit next to a comment
+  // explaining that the analysis and the renderer parsed a CR differently, and
+  // that reason really did go away when the analysis started reading the
+  // renderer's blocks — so the comment read like the whole justification. It
+  // was not: the same two lines were holding up a product contract that says a
+  // half-arrived destination must not be painted at all
+  // (`SMD-W-05 unsupported link grammar stays fail-closed`, twelve fixtures,
+  // this construction is the twelfth). Deleting them put the URL on screen.
+  //
+  // What did NOT come back: truncating the SOURCE before parsing, and carrying
+  // each run's extent alongside the ledger. Those were the two-parser
+  // machinery, and they are still gone — the blocks arrive from the caller now.
+  // Only the boundary is set here; the ledger follows it at the end of the scan
+  // the same way it follows every other reason the boundary moves.
+  //
+  // Both of those are about WITHHOLDING, so the rule only exists when some
+  // withholding rule does. With every one of them off, the screen paints past
+  // the CR, the report says the same, and the offsets agree with both — there
+  // is no reading anyone is harmed by, only content needlessly dropped.
+  final bool anythingCouldBeWithheld =
+      withholdIncompleteDestinations || suppressRawHtml;
+  final int loneCarriageReturn =
+      anythingCouldBeWithheld ? _firstLoneCarriageReturn(source) : -1;
+  int safeEnd =
+      loneCarriageReturn == -1 ? source.length : loneCarriageReturn;
 
   // Blocks are separated by one newline in the visible text. It comes from no
   // single source character, so it reports the end of the block it follows —
@@ -228,11 +261,17 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   // is one function, and this calls it rather than owning a second opinion.
   for (final MarkdownRenderNode block
       in projections._collectRenderableBlocks(blocks)) {
-    if (!_slicesBackOut(source, block)) {
+    if (!_canSpeakFor(source, block, loneCarriageReturn)) {
       // Two different answers, with two different requirements.
       //
       // The LEDGER needs to know where each character came from, and for this
       // block nobody does — so it contributes none.
+      //
+      // Clamping the boundary is what makes the CR case hold, and only this
+      // does: cutting the finished ledger by OFFSET lets generated text
+      // through, because a whole generated run reports the ONE position it
+      // started at. `\$\$x\ry\$\$` maps both `x` and `y` to 0, so both sit
+      // before any boundary and both survive the cut.
       //
       // The BOUNDARY is a lower bound on what is safe to paint, and leaving a
       // block out RAISES it. That is the one direction that leaks: an
@@ -250,8 +289,6 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       // (`text/inline.dart:192`), so a caller who turned destination
       // withholding off and left raw-HTML suppression on still has a rule that
       // can fire — and it protects the same kind of secret.
-      final bool anythingCouldBeWithheld =
-          withholdIncompleteDestinations || suppressRawHtml;
       if (anythingCouldBeWithheld && block.startCodeUnit < safeEnd) {
         safeEnd = block.startCodeUnit;
       }
@@ -435,6 +472,17 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   );
 }
 
+/// Index of the first CR that is not part of a CRLF, or -1.
+int _firstLoneCarriageReturn(String source) {
+  for (int i = 0; i < source.length; i++) {
+    if (source.codeUnitAt(i) == 13 &&
+        (i + 1 >= source.length || source.codeUnitAt(i + 1) != 10)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 /// The same report for a caller that holds only the source.
 ///
 /// Parses with [MarkdownSyncParser] — the parser
@@ -496,10 +544,26 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegionsOfSource(
 /// comparison is a substring of the whole document per block per parse, on a
 /// streaming path. The exact one runs in debug, on the caller's blocks, at the
 /// top of the scan.
-bool _slicesBackOut(String source, MarkdownRenderNode block) =>
-    block.startCodeUnit >= 0 &&
-    block.endCodeUnit <= source.length &&
-    block.endCodeUnit - block.startCodeUnit == block.raw.length;
+///
+/// The other way to lose it is a lone CR anywhere in the block: past that
+/// point the text was read under a grammar CommonMark disagrees with, so the
+/// characters are real but what they MEAN is not settled. Same answer, same
+/// branch — one predicate rather than two mechanisms, which is what the first
+/// attempt at the CR case got wrong (it truncated the source before parsing,
+/// then had to carry each run's source extent alongside the ledger to clip
+/// what that let through, and the extent grew a tax every round).
+bool _canSpeakFor(
+  String source,
+  MarkdownRenderNode block,
+  int loneCarriageReturn,
+) {
+  if (loneCarriageReturn != -1 && block.endCodeUnit > loneCarriageReturn) {
+    return false;
+  }
+  return block.startCodeUnit >= 0 &&
+      block.endCodeUnit <= source.length &&
+      block.endCodeUnit - block.startCodeUnit == block.raw.length;
+}
 
 /// Whether this block's CONTENT is raw data rather than prose.
 ///

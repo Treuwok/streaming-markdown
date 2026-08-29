@@ -218,23 +218,42 @@ void main() {
       expect(nothingWithheld.safeEndCodeUnits, source.length);
     });
 
-    test('a lone CR no longer stops the scan', () {
-      // It used to. CommonMark calls a lone CR a line ending and the block
-      // parser does not, so a fence closes for one reading and not the other —
-      // and the analysis, running its own parser, could not tell which one was
-      // on screen. It stopped at the CR and over-hid the rest.
+    test('a lone CR stops the scan', () {
+      // CommonMark calls a lone CR a line ending and this parser does not, so
+      // the fence below never closes for it and swallows the rest — painting
+      // the unfinished destination verbatim as code. The report will not vouch
+      // for text it read under a grammar the spec disagrees with.
       //
-      // There is one reading now. This fence never closes, so everything after
-      // it is code content, and code is painted verbatim — including the
-      // unfinished destination, which is text on the screen rather than a link
-      // anyone can follow. That the report says the same is checked against
-      // the widget itself in `painted_text_matches_projection_test.dart`; this
-      // pins the boundary, which is what the caller truncates by.
+      // ⚠️ Removed in #5 and put back. The comment that used to sit next to
+      // this explained the analysis-vs-renderer disagreement, and that reason
+      // really did go away — so it read like the whole justification. It was
+      // not: `SMD-W-05 unsupported link grammar stays fail-closed` on the
+      // consuming app says a half-arrived destination must not be painted at
+      // all, and this construction is one of its twelve fixtures.
       const String source =
           '```md\ncode\r```\r[help](https://secret.example';
       final WithheldMarkdownRegions regions =
           analyzeWithheldMarkdownRegionsOfSource(source);
-      expect(regions.safeEndCodeUnits, source.length);
+      // At or before the CR, not exactly at it: a block that reaches past the
+      // CR is one the report cannot speak for at all, so the boundary goes to
+      // that block's start. Pinning the exact index would be pinning which of
+      // the two floors happened to be lower for this fixture.
+      expect(regions.safeEndCodeUnits, lessThanOrEqualTo(source.indexOf('\r')));
+      expect(source.substring(0, regions.safeEndCodeUnits),
+          isNot(contains('secret.example')));
+
+      // And with every withholding rule off there is nothing for the rule to
+      // protect: the screen paints past the CR, so dropping the content would
+      // only lose it. The rule exists because of withholding and goes away
+      // with it.
+      expect(
+        analyzeWithheldMarkdownRegionsOfSource(
+          source,
+          withholdIncompleteDestinations: false,
+          suppressRawHtml: false,
+        ).safeEndCodeUnits,
+        source.length,
+      );
     });
 
     test('a newline never releases a destination mid-stream', () {
