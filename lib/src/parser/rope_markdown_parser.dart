@@ -19,6 +19,29 @@ const List<String> rawTextHtmlElements = <String>[
   'textarea',
 ];
 
+/// The raw-text element this line opens, or null.
+///
+/// `<pre>` and `<pre class=...>` are the element; `<prefix>` is not.
+String? rawTextHtmlElementAt(String line) {
+  final String opening = line.trimLeft().toLowerCase();
+  for (final String name in rawTextHtmlElements) {
+    if (!opening.startsWith('<' + name)) {
+      continue;
+    }
+    final int after = 1 + name.length;
+    if (after >= opening.length || !_isHtmlNameChar(opening.codeUnitAt(after))) {
+      return name;
+    }
+  }
+  return null;
+}
+
+bool _isHtmlNameChar(int c) =>
+    (c >= 0x30 && c <= 0x39) ||
+    (c >= 0x41 && c <= 0x5a) ||
+    (c >= 0x61 && c <= 0x7a) ||
+    c == 0x2d;
+
 /// Small pure-Dart block parser for [RopeString] sources.
 ///
 /// This parser is intentionally lightweight. It is useful for environments
@@ -493,17 +516,42 @@ class RopeMarkdownParser {
   }
 
   _GenericBlockResult _parseHtmlBlock(List<_LineSlice> lines, int startIndex) {
+    final String? rawText = rawTextHtmlElementAt(lines[startIndex].text);
     final StringBuffer content = StringBuffer();
     int i = startIndex;
-    while (i < lines.length && !_isBlank(lines[i].text)) {
-      content.writeln(lines[i].text);
-      i++;
+    bool closed = true;
+
+    if (rawText == null) {
+      while (i < lines.length && !_isBlank(lines[i].text)) {
+        content.writeln(lines[i].text);
+        i++;
+      }
+    } else {
+      // A raw-text element ends at its closing tag, NOT at a blank line —
+      // everything between the tags is data.
+      //
+      // Ending it at a blank line split the block, and only the FIRST half was
+      // ever recognised as raw data: `<script>a\n\nb</script>` suppressed `a`
+      // and put `b` on the screen. The name being in every list did not help,
+      // because by then it was somebody else's block.
+      final String closing = '</' + rawText;
+      closed = false;
+      while (i < lines.length) {
+        content.writeln(lines[i].text);
+        final bool ends = lines[i].text.toLowerCase().contains(closing);
+        i++;
+        if (ends) {
+          closed = true;
+          break;
+        }
+      }
     }
+
     return _GenericBlockResult(
       end: lines[i - 1].end,
       nextIndex: i,
       content: content.toString().trimRight(),
-      closed: true,
+      closed: closed,
     );
   }
 
