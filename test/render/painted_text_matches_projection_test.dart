@@ -260,9 +260,6 @@ void main() {
       );
       expect(report.visibleSourceOffsets.length, report.visibleText.length,
           reason: source);
-      for (final int offset in report.visibleSourceOffsets) {
-        expect(offset, inInclusiveRange(0, source.length - 1), reason: source);
-      }
       // Ascending, non-overlapping, inside the boundary — which is what the
       // field's own doc promises and nothing checked. A consumer cuts text at
       // these coordinates, so a pair out of order or overlapping corrupts the
@@ -275,6 +272,9 @@ void main() {
         previousEnd = end;
       }
 
+      // Never past the safety boundary — which also covers "inside the
+      // source at all", since the boundary never exceeds its length. An
+      // in-range check beside this one asserted a strictly weaker thing.
       // Never past the safety boundary. The report answers "how far is it safe
       // to draw" in one field and "here is the text" in another; a caller that
       // trusts the second has no way to learn the first was smaller. A lone CR
