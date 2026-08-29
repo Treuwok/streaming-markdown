@@ -2,16 +2,29 @@ part of '../view.dart';
 
 extension _StreamingMarkdownInlineMarkdownRenderer
     on StreamingMarkdownRenderView {
+  /// Paints inline Markdown, and takes a [_SourceSlice] rather than a
+  /// `String` on purpose.
+  ///
+  /// Every block type projects its own text before arriving here — a list
+  /// splits items, a table splits cells, a callout lifts its title out. Those
+  /// projections are where provenance was being dropped, and while this took a
+  /// `String` there was nothing to stop the next one from dropping it too:
+  /// anything that needed to map painted characters back to the source had to
+  /// re-derive the projection, per block type, by hand.
+  ///
+  /// Requiring the slice puts that on the compiler. A new block type cannot
+  /// reach the screen without saying where its text came from.
   Widget _buildInlineMarkdown(
     BuildContext context,
-    String text, {
+    _SourceSlice slice, {
     int tokenStartIndex = 0,
     int plainTextStart = 0,
     TextStyle? baseStyle,
     Map<String, String> linkReferences = const <String, String>{},
     Map<String, int> footnoteNumbers = const <String, int>{},
   }) {
-    final String normalized = text.replaceAll('\r', '');
+    final _SourceSlice normalizedSlice = slice.withoutCarriageReturns();
+    final String normalized = normalizedSlice.text;
     if (normalized.isEmpty) {
       return const SizedBox.shrink();
     }

@@ -1,16 +1,25 @@
 part of '../view.dart';
 
 extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
-  _ParsedList _parseListNode(MarkdownRenderNode node) {
-    final List<String> lines = _normalizedRaw(node.raw).split('\n');
+  _ParsedList _parseListNode(MarkdownRenderNode node) =>
+      _parseListSlices(_normalizedSlice(node.raw, 0));
+
+  /// Items with their bodies as slices.
+  ///
+  /// The body's position comes from the regex match that found it — the group
+  /// start is already known here. It used to be discarded, leaving the caller
+  /// to search the block for the body's text, which matched the marker for an
+  /// item like `1. 1`.
+  _ParsedList _parseListSlices(_SourceSlice source) {
+    final List<_SourceSlice> lines = source.splitLines();
     final List<_ParsedListItem> items = <_ParsedListItem>[];
 
-    for (final String line in lines) {
+    for (final _SourceSlice line in lines) {
       final RegExpMatch? markerMatch = RegExp(
         r'^(\s*)([-+*]|\d+[.)])\s+(.*)$',
-      ).firstMatch(line);
+      ).firstMatch(line.text);
       if (markerMatch == null) {
-        if (items.isNotEmpty && line.trim().isNotEmpty) {
+        if (items.isNotEmpty && line.text.trim().isNotEmpty) {
           final _ParsedListItem last = items.removeLast();
           items.add(
             _ParsedListItem(
@@ -18,7 +27,20 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
               ordered: last.ordered,
               order: last.order,
               taskState: last.taskState,
-              text: '${last.text} ${line.trim()}',
+              // The joining space IS the line break it replaced, painted
+              // differently — same as a paragraph's folded newline. Giving it
+              // that position keeps the whole body traceable, where a
+              // position-less space used to cost the item every range in it.
+              // The joining space IS the line break it replaced. When the
+              // previous body is empty it has no end to borrow, so the break
+              // itself — one before this line starts — is the position.
+              body: last.body +
+                  _SourceSlice.whole(
+                      ' ',
+                      last.body.sourceEnd >= 0
+                          ? last.body.sourceEnd
+                          : (line.sourceStart > 0 ? line.sourceStart - 1 : 0)) +
+                  line.trim(),
               stableKey: last.stableKey,
             ),
           );
@@ -27,14 +49,21 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
       }
 
       final String marker = markerMatch.group(2)!;
-      String body = markerMatch.group(3)!.trimRight();
+      // Dart has no per-group offset, but the pattern is anchored at both
+      // ends, so the body starts exactly where the line stops being marker.
+      final String bodyText = markerMatch.group(3)!;
+      _SourceSlice body = line
+          .sub(line.text.length - bodyText.length, line.text.length)
+          .trimRight();
       bool? taskState;
       final RegExpMatch? taskMatch = RegExp(
         r'^\[([ xX])\]\s*(.*)$',
-      ).firstMatch(body);
+      ).firstMatch(body.text);
       if (taskMatch != null) {
         taskState = taskMatch.group(1)!.toLowerCase() == 'x';
-        body = taskMatch.group(2)!;
+        final String afterTask = taskMatch.group(2)!;
+        body = body.sub(
+            body.text.length - afterTask.length, body.text.length);
       }
 
       final int level = (markerMatch.group(1)!.length / 2).floor();
@@ -49,7 +78,7 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
           ordered: ordered,
           order: order,
           taskState: taskState,
-          text: body.trim(),
+          body: body.trim(),
           stableKey: 'line_${items.length}',
         ),
       );
@@ -58,27 +87,41 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
     return _ParsedList(items: items);
   }
 
-  _CalloutData? _parseCallout(String text) {
-    final List<String> lines = text.split('\n');
+  /// The callout's title and body, each knowing where it came from.
+  ///
+  /// A custom title is a slice of the first line; only the DEFAULT title is
+  /// generated, and only that one has no position of its own.
+  _CalloutData? _parseCalloutSlices(_SourceSlice source) {
+    final List<_SourceSlice> lines = source.splitLines();
     if (lines.isEmpty) {
       return null;
     }
 
+    final _SourceSlice first = lines.first;
     final RegExpMatch? match = RegExp(
       r'^\s*\[!(\w+)\]\s*(.*)$',
-    ).firstMatch(lines.first);
+    ).firstMatch(first.text);
     if (match == null) {
       return null;
     }
 
     final String kind = match.group(1)!.toLowerCase();
-    final String title = match.group(2)!.trim().isEmpty
-        ? kind[0].toUpperCase() + kind.substring(1)
-        : match.group(2)!.trim();
-    final String body = lines.skip(1).join('\n').trim();
+    final String customTitle = match.group(2)!;
+    final int at = first.offsets.isEmpty ? 0 : first.offsets.first;
+    final _SourceSlice titleSlice = customTitle.trim().isEmpty
+        ? _SourceSlice.generated(
+            kind[0].toUpperCase() + kind.substring(1), at)
+        : first
+            .sub(first.text.length - customTitle.length, first.text.length)
+            .trim();
 
-    return _CalloutData(kind: kind, title: title, body: body);
+    return _CalloutData(
+      kind: kind,
+      titleSlice: titleSlice,
+      bodySlice: _joinSliceLines(lines.skip(1).toList(growable: false)).trim(),
+    );
   }
+
 
   Color _calloutColor(String? kind) {
     switch (kind) {
@@ -114,46 +157,46 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
     }
   }
 
-  String _quoteText(MarkdownRenderNode node) {
-    return _normalizedRaw(node.raw)
-        .split('\n')
-        .map((String line) => line.replaceFirst(RegExp(r'^\s*>\s?'), ''))
-        .join('\n')
-        .trim();
-  }
+  String _quoteText(MarkdownRenderNode node) =>
+      _quoteSlice(node.raw, 0).text;
 
-  String _codeText(MarkdownRenderNode node) {
-    final String raw = _normalizedRaw(node.raw);
-    if (node.type == 'fenced_code_block') {
-      final List<String> lines = raw.split('\n');
-      if (lines.isNotEmpty &&
-          RegExp(r'^\s*(```+|~~~+)').hasMatch(lines.first)) {
-        lines.removeAt(0);
-      }
-      if (lines.isNotEmpty &&
-          RegExp(r'^\s*(```+|~~~+)\s*$').hasMatch(lines.last)) {
-        lines.removeLast();
-      }
-      return lines.join('\n').trimRight();
-    }
-    if (node.type == 'indented_code_block') {
-      return raw
-          .split('\n')
-          .map((String line) => line.replaceFirst(RegExp(r'^(?: {4}|\t)'), ''))
-          .join('\n')
-          .trimRight();
-    }
-    return raw;
-  }
 
-  String _codeLanguage(String raw) {
+  String _codeText(MarkdownRenderNode node) =>
+      _codeSlice(node.raw, 0, node.type).text;
+
+
+  String _codeLanguage(String raw) =>
+      _codeLanguageSlice(_SourceSlice.whole(raw, 0))?.text ?? '';
+
+  /// The info-string token the header paints, as a span of the source.
+  ///
+  /// Returning the span rather than the text is the point: the header shows
+  /// exactly this token, and an info string can carry more after it. Finding
+  /// the token's text and then searching the block for it reported the whole
+  /// remainder of the opening line.
+  ///
+  /// The gap after the fence marker is `[ \t]*`, NOT `\s*`.
+  ///
+  /// `\s` matches a newline, so the old pattern ran past the end of the
+  /// opening line and took the first word of the BODY as the language — and
+  /// the header painted it. A fence with no info string labelled itself `let`
+  /// for a block starting `let x = 1`.
+  ///
+  /// It was left alone once, as a renderer quirk to report faithfully rather
+  /// than diverge from. That stopped being tenable when the same characters
+  /// were painted twice — once as the header, once as the body — because the
+  /// source ledger then has to go backwards, and a reveal cursor reading it
+  /// re-hides text it has already shown. An info string lives on the opening
+  /// line; the pattern now says so.
+  _SourceSlice? _codeLanguageSlice(_SourceSlice raw) {
     final RegExpMatch? match = RegExp(
-      r'^\s*(```+|~~~+)\s*([A-Za-z0-9_+\-\.#]*)',
+      r'^[ \t]*(```+|~~~+)[ \t]*([A-Za-z0-9_+\-\.#]*)',
       multiLine: true,
-    ).firstMatch(raw);
-    if (match == null) {
-      return '';
+    ).firstMatch(raw.text);
+    final String? token = match?.group(2);
+    if (token == null || token.trim().isEmpty) {
+      return null;
     }
-    return match.group(2)!.trim();
+    return raw.sub(match!.end - token.length, match.end).trim();
   }
 }

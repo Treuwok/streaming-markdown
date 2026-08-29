@@ -3,6 +3,45 @@ import '../model/rope.dart';
 
 part 'rope_markdown_models.dart';
 
+/// The CommonMark raw-text elements: everything between the tags is data, not
+/// markup.
+///
+/// One list, because there were two. This parser's block-start pattern listed
+/// `pre`, `script` and `style` while the render side's raw-text test listed
+/// those AND `textarea` — so a `<textarea>` never became an html_block here,
+/// the raw-text guard over there never saw it, and its contents were reported
+/// as visible text while the renderer paints none of it. Of the four, that is
+/// the one whose content is by definition somebody's typing.
+const List<String> rawTextHtmlElements = <String>[
+  'script',
+  'style',
+  'pre',
+  'textarea',
+];
+
+/// The raw-text element this line opens, or null.
+///
+/// `<pre>` and `<pre class=...>` are the element; `<prefix>` is not.
+String? rawTextHtmlElementAt(String line) {
+  final String opening = line.trimLeft().toLowerCase();
+  for (final String name in rawTextHtmlElements) {
+    if (!opening.startsWith('<' + name)) {
+      continue;
+    }
+    final int after = 1 + name.length;
+    if (after >= opening.length || !_isHtmlNameChar(opening.codeUnitAt(after))) {
+      return name;
+    }
+  }
+  return null;
+}
+
+bool _isHtmlNameChar(int c) =>
+    (c >= 0x30 && c <= 0x39) ||
+    (c >= 0x41 && c <= 0x5a) ||
+    (c >= 0x61 && c <= 0x7a) ||
+    c == 0x2d;
+
 /// Small pure-Dart block parser for [RopeString] sources.
 ///
 /// This parser is intentionally lightweight. It is useful for environments
@@ -323,6 +362,10 @@ class RopeMarkdownParser {
     return true;
   }
 
+  /// Whether [text] is indented enough to continue the list item above it.
+  static bool _isIndentedContinuation(String text) =>
+      text.startsWith('  ') || text.startsWith('\t');
+
   _ListItemMatch? _parseListItem(String text) {
     final RegExpMatch? unordered = RegExp(
       r'^\s*([-*+])\s+(.+)$',
@@ -351,10 +394,28 @@ class RopeMarkdownParser {
         break;
       }
 
-      items.add(
-        ListItemNode(start: lines[i].start, end: lines[i].end, text: item.text),
-      );
+      final int itemStart = lines[i].start;
+      final StringBuffer itemText = StringBuffer(item.text);
+      int itemEnd = lines[i].end;
       i++;
+
+      // A continuation line belongs to the item above it. The renderer folds
+      // it in with a space; ending the list here instead left the analysis
+      // seeing a separate paragraph, so `- first\n  second` was reported as
+      // two lines while the screen paints one.
+      while (i < lines.length &&
+          !_isBlank(lines[i].text) &&
+          _parseListItem(lines[i].text) == null &&
+          _isIndentedContinuation(lines[i].text)) {
+        itemText.write('\n');
+        itemText.write(lines[i].text.trim());
+        itemEnd = lines[i].end;
+        i++;
+      }
+
+      items.add(
+        ListItemNode(start: itemStart, end: itemEnd, text: itemText.toString()),
+      );
     }
 
     final int end = items.isEmpty ? lines[startIndex].end : items.last.end;
@@ -455,17 +516,42 @@ class RopeMarkdownParser {
   }
 
   _GenericBlockResult _parseHtmlBlock(List<_LineSlice> lines, int startIndex) {
+    final String? rawText = rawTextHtmlElementAt(lines[startIndex].text);
     final StringBuffer content = StringBuffer();
     int i = startIndex;
-    while (i < lines.length && !_isBlank(lines[i].text)) {
-      content.writeln(lines[i].text);
-      i++;
+    bool closed = true;
+
+    if (rawText == null) {
+      while (i < lines.length && !_isBlank(lines[i].text)) {
+        content.writeln(lines[i].text);
+        i++;
+      }
+    } else {
+      // A raw-text element ends at its closing tag, NOT at a blank line —
+      // everything between the tags is data.
+      //
+      // Ending it at a blank line split the block, and only the FIRST half was
+      // ever recognised as raw data: `<script>a\n\nb</script>` suppressed `a`
+      // and put `b` on the screen. The name being in every list did not help,
+      // because by then it was somebody else's block.
+      final String closing = '</' + rawText;
+      closed = false;
+      while (i < lines.length) {
+        content.writeln(lines[i].text);
+        final bool ends = lines[i].text.toLowerCase().contains(closing);
+        i++;
+        if (ends) {
+          closed = true;
+          break;
+        }
+      }
     }
+
     return _GenericBlockResult(
       end: lines[i - 1].end,
       nextIndex: i,
       content: content.toString().trimRight(),
-      closed: true,
+      closed: closed,
     );
   }
 
@@ -525,8 +611,13 @@ class RopeMarkdownParser {
 
   bool _isHtmlBlockStart(String text) {
     final String trimmed = text.trimLeft();
+    // The raw-text names come from [rawTextHtmlElements] rather than being
+    // spelled again here; the rest are ordinary block-level containers.
+    final String rawText = rawTextHtmlElements.join('|');
     return RegExp(
-      r'^</?(?:article|aside|blockquote|details|div|dl|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|main|nav|ol|p|pre|section|table|ul|script|style|!--)\b',
+      '^</?(?:article|aside|blockquote|details|div|dl|fieldset|figcaption'
+      '|figure|footer|form|h[1-6]|header|hr|main|nav|ol|p|section|table|ul'
+      '|' + rawText + '|!--)' + r'\b',
       caseSensitive: false,
     ).hasMatch(trimmed);
   }

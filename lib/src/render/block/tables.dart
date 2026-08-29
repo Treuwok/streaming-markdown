@@ -2,51 +2,14 @@ part of '../view.dart';
 
 extension _StreamingMarkdownTableAndMetadataRenderer
     on StreamingMarkdownRenderView {
-  Widget _buildTableBlock(
-    BuildContext context,
-    MarkdownRenderNode node, {
-    required Map<String, String> linkReferences,
-    required Map<String, int> footnoteNumbers,
-  }) {
-    final _ParsedTable? parsed = _parseMarkdownTable(
-      _normalizedRaw(node.raw),
-      allowLooseWithoutDelimiter: true,
-      minLooseRowsWithoutDelimiter: 2,
-    );
-    if (parsed != null) {
-      _rememberTableSnapshot(node, parsed);
-      return _buildTableWidget(
-        context,
-        parsed,
-        linkReferences: linkReferences,
-        footnoteNumbers: footnoteNumbers,
-      );
-    }
-
-    final _ParsedTable? snapshot = _readTableSnapshot(node);
-    if (snapshot != null) {
-      return _buildTableWidget(
-        context,
-        snapshot,
-        linkReferences: linkReferences,
-        footnoteNumbers: footnoteNumbers,
-      );
-    }
-
-    return _buildParagraphBlock(
-      context,
-      _contentOrRaw(node),
-      linkReferences: linkReferences,
-      footnoteNumbers: footnoteNumbers,
-    );
-  }
-
   Widget _buildTableWidget(
     BuildContext context,
     _ParsedTable table, {
+    required _SourceSlice source,
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
   }) {
+    final int cellOrigin = source.offsets.isEmpty ? 0 : source.offsets.first;
     final ThemeData theme = Theme.of(context);
     final ColorScheme colorScheme = theme.colorScheme;
     final _RevealScheduleScope? scheduleScope = _RevealScheduleScope.maybeOf(
@@ -131,6 +94,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
                     final List<Widget> rowTables = _buildTableRows(
                       tableContext,
                       table: table,
+                      cellOrigin: cellOrigin,
                       theme: theme,
                       colorScheme: colorScheme,
                       headerBackground: headerBackground,
@@ -181,6 +145,7 @@ extension _StreamingMarkdownTableAndMetadataRenderer
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
     required List<List<int>> plainTextStarts,
+    required int cellOrigin,
   }) {
     Widget buildStableCellContent({
       required String cell,
@@ -192,7 +157,11 @@ extension _StreamingMarkdownTableAndMetadataRenderer
         enabled: true,
         child: _buildInlineMarkdown(
           context,
-          cell,
+          // Painted only. The table's per-cell origins are produced by
+          // `_tableCellSlices`, which splits rather than searches; the widget
+          // does not carry them, and says so rather than handing over a
+          // position found by looking the text up again.
+          _SourceSlice.generated(cell, cellOrigin),
           tokenStartIndex: tokenStartIndex,
           plainTextStart: plainTextStart,
           baseStyle: baseStyle,

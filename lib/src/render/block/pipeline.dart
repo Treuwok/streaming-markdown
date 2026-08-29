@@ -97,7 +97,7 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
         fragments,
       );
       final _ParsedTable? parsed = _parseMarkdownTable(
-        _normalizedRaw(synthesized.raw),
+        _normalizedSlice(synthesized.raw, 0),
         allowLooseWithoutDelimiter: true,
         minLooseRowsWithoutDelimiter: 2,
       );

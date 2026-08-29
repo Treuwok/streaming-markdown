@@ -13,6 +13,17 @@ abstract class MarkdownBlockNode {
   /// Exclusive end offset of the node in the source string, in the same units
   /// as [start].
   final int end;
+
+  /// The renderer's name for this kind of block.
+  ///
+  /// Every node answers for itself. A caller that switched on the node's
+  /// CLASS instead had to keep a list of the classes it knew, and a class
+  /// missing from that list got the empty string — which routed silently to
+  /// the fallback. `ParagraphNode` was missing from one such list, so no
+  /// paragraph was ever recognised as the table or definition list it was.
+  /// Making it abstract means a new node type cannot compile without saying
+  /// what it is.
+  String get type;
 }
 
 /// Immutable parse result for a full markdown document.
@@ -45,6 +56,7 @@ class HeadingNode extends MarkdownBlockNode {
   final String text;
 
   /// Renderer-compatible heading type.
+  @override
   final String type;
 }
 
@@ -59,6 +71,9 @@ class ParagraphNode extends MarkdownBlockNode {
 
   /// Paragraph text content.
   final String text;
+
+  @override
+  String get type => 'paragraph';
 }
 
 /// Generic block node for Markdown constructs parsed without a specialized
@@ -73,6 +88,7 @@ class GenericBlockNode extends MarkdownBlockNode {
   });
 
   /// Renderer-compatible block type.
+  @override
   final String type;
 
   /// Human-readable content extracted from the block.
@@ -102,6 +118,9 @@ class CodeFenceNode extends MarkdownBlockNode {
 
   /// Whether a matching closing fence was present.
   final bool closed;
+
+  @override
+  String get type => 'fenced_code_block';
 }
 
 /// Ordered (`1.`) or unordered (`-`) list block node.
@@ -119,6 +138,9 @@ class ListNode extends MarkdownBlockNode {
 
   /// Flattened list item nodes for this list block.
   final List<ListItemNode> items;
+
+  @override
+  String get type => 'list';
 }
 
 /// Single list item node.

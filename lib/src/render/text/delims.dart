@@ -1,8 +1,16 @@
 part of '../view.dart';
 
 extension _StreamingMarkdownDelimiterParsing on StreamingMarkdownRenderView {
-  List<_FootnoteDefinition> _parseFootnoteDefinitions(String raw) {
-    final List<String> lines = _normalizedRaw(raw).split('\n');
+  List<_FootnoteDefinition> _parseFootnoteDefinitions(String raw) =>
+      _parseFootnoteDefinitionSlices(_SourceSlice.whole(_normalizedRaw(raw), 0));
+
+  /// Definitions with their bodies as slices.
+  ///
+  /// The body starts where the line stops being `[^id]:` — known here, and
+  /// previously discarded, which left the caller searching the block for the
+  /// body's text. For `[^note]: note` that search found the identifier.
+  List<_FootnoteDefinition> _parseFootnoteDefinitionSlices(_SourceSlice raw) {
+    final List<_SourceSlice> lines = raw.splitLines();
     if (lines.isEmpty) {
       return <_FootnoteDefinition>[];
     }
@@ -10,7 +18,8 @@ extension _StreamingMarkdownDelimiterParsing on StreamingMarkdownRenderView {
     final RegExp definitionLine = RegExp(r'^\s{0,3}\[\^([^\]]+)\]:\s*(.*)$');
     final List<_FootnoteDefinition> definitions = <_FootnoteDefinition>[];
     String? currentId;
-    List<String> currentBody = <String>[];
+    int currentStart = 0;
+    List<_SourceSlice> currentBody = <_SourceSlice>[];
 
     void flush() {
       final String? id = currentId;
@@ -18,26 +27,34 @@ extension _StreamingMarkdownDelimiterParsing on StreamingMarkdownRenderView {
         return;
       }
       definitions.add(
-        _FootnoteDefinition(id: id, body: currentBody.join('\n').trim()),
+        _FootnoteDefinition(
+          id: id,
+          bodySlice: _joinSliceLines(currentBody).trim(),
+          sourceStart: currentStart,
+        ),
       );
     }
 
-    for (final String line in lines) {
-      final RegExpMatch? definition = definitionLine.firstMatch(line);
+    for (final _SourceSlice line in lines) {
+      final RegExpMatch? definition = definitionLine.firstMatch(line.text);
       if (definition != null) {
         flush();
         currentId = definition.group(1)!.trim();
-        currentBody = <String>[definition.group(2)!.trim()];
+        currentStart = line.sourceStart >= 0 ? line.sourceStart : 0;
+        final String bodyText = definition.group(2)!;
+        currentBody = <_SourceSlice>[
+          line.sub(line.text.length - bodyText.length, line.text.length).trim(),
+        ];
         continue;
       }
       if (currentId == null) {
         continue;
       }
-      if (line.trim().isEmpty) {
-        currentBody.add('');
+      if (line.text.trim().isEmpty) {
+        currentBody.add(_SourceSlice.empty);
         continue;
       }
-      currentBody.add(line.replaceFirst(RegExp(r'^\s{0,4}'), '').trimRight());
+      currentBody.add(line.stripLeading(RegExp(r'^\s{0,4}')).trimRight());
     }
     flush();
 

@@ -1,12 +1,17 @@
 part of '../view.dart';
 
 extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
+  /// Parses [raw] into the grid the table widget paints.
+  ///
+  /// [raw] is a slice rather than a string so that every cell keeps the
+  /// position it was cut from. Anything that needs to know where a painted
+  /// cell came from reads it off the result; nothing searches for it.
   _ParsedTable? _parseMarkdownTable(
-    String raw, {
+    _SourceSlice raw, {
     bool allowLooseWithoutDelimiter = false,
     int minLooseRowsWithoutDelimiter = 1,
   }) {
-    final List<String> lines = _firstTableLineRun(raw);
+    final List<_SourceSlice> lines = _firstTableLineRun(raw);
     if (lines.length < 2 && !allowLooseWithoutDelimiter) {
       return null;
     }
@@ -23,16 +28,16 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
         return null;
       }
 
-      final List<List<String>> rows = lines
-          .map(_splitTableRow)
-          .where((List<String> row) => row.isNotEmpty)
+      final List<List<_SourceSlice>> rows = lines
+          .map(_splitTableRowSlices)
+          .where((List<_SourceSlice> row) => row.isNotEmpty)
           .toList(growable: false);
       if (rows.length < minLooseRowsWithoutDelimiter || rows.isEmpty) {
         return null;
       }
 
       int width = 0;
-      for (final List<String> row in rows) {
+      for (final List<_SourceSlice> row in rows) {
         if (row.length > width) {
           width = row.length;
         }
@@ -41,31 +46,32 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
         return null;
       }
 
-      final List<String> headers = _fitTableRowToWidth(rows.first, width);
-      final List<List<String>> bodyRows = rows
-          .skip(1)
-          .map((List<String> row) => _fitTableRowToWidth(row, width))
-          .toList(growable: false);
-
-      return _ParsedTable(headers: headers, rows: bodyRows);
+      return _ParsedTable(
+        headerCells: _fitTableRowToWidth(rows.first, width),
+        rowCells: rows
+            .skip(1)
+            .map((List<_SourceSlice> row) => _fitTableRowToWidth(row, width))
+            .toList(growable: false),
+      );
     }
 
-    final List<String> rawHeaders = delimiterIndex > 0
-        ? _splitTableRow(lines[delimiterIndex - 1])
-        : <String>[];
-    final List<String> delimiterCells = _splitTableRow(lines[delimiterIndex]);
+    final List<_SourceSlice> rawHeaders = delimiterIndex > 0
+        ? _splitTableRowSlices(lines[delimiterIndex - 1])
+        : <_SourceSlice>[];
+    final List<_SourceSlice> delimiterCells =
+        _splitTableRowSlices(lines[delimiterIndex]);
     int width = rawHeaders.length > delimiterCells.length
         ? rawHeaders.length
         : delimiterCells.length;
 
-    final List<List<String>> rawRows = <List<String>>[];
+    final List<List<_SourceSlice>> rawRows = <List<_SourceSlice>>[];
     for (int i = delimiterIndex + 1; i < lines.length; i++) {
-      final String line = lines[i].trim();
-      if (line.isEmpty || !line.contains('|')) {
+      final _SourceSlice line = lines[i].trim();
+      if (line.text.isEmpty || !line.text.contains('|')) {
         continue;
       }
 
-      final List<String> row = _splitTableRow(line);
+      final List<_SourceSlice> row = _splitTableRowSlices(line);
       if (row.isEmpty) {
         continue;
       }
@@ -80,26 +86,26 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
     }
 
     // Keep table stable during streaming even when header row is not ready yet.
-    final List<String> headers = _fitTableRowToWidth(rawHeaders, width);
-    final List<List<String>> rows = rawRows
-        .map((List<String> row) => _fitTableRowToWidth(row, width))
-        .toList(growable: false);
-
-    return _ParsedTable(headers: headers, rows: rows);
+    return _ParsedTable(
+      headerCells: _fitTableRowToWidth(rawHeaders, width),
+      rowCells: rawRows
+          .map((List<_SourceSlice> row) => _fitTableRowToWidth(row, width))
+          .toList(growable: false),
+    );
   }
 
-  List<String> _firstTableLineRun(String raw) {
-    final List<String> out = <String>[];
+  List<_SourceSlice> _firstTableLineRun(_SourceSlice raw) {
+    final List<_SourceSlice> out = <_SourceSlice>[];
     bool started = false;
-    for (final String original in raw.split('\n')) {
-      final String line = original.trimRight();
-      if (line.trim().isEmpty) {
+    for (final _SourceSlice original in raw.splitLines()) {
+      final _SourceSlice line = original.trimRight();
+      if (line.text.trim().isEmpty) {
         if (started) {
           break;
         }
         continue;
       }
-      if (!line.contains('|')) {
+      if (!line.text.contains('|')) {
         if (started) {
           break;
         }
@@ -111,10 +117,13 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
     return out;
   }
 
-  List<String> _fitTableRowToWidth(List<String> row, int width) {
-    final List<String> out = row.toList(growable: true);
+  List<_SourceSlice> _fitTableRowToWidth(List<_SourceSlice> row, int width) {
+    final List<_SourceSlice> out = row.toList(growable: true);
+    // A padding cell is not in the source at all — it exists because the grid
+    // is rectangular and this row was short.
+    final int at = out.isEmpty ? 0 : out.last.sourceEnd;
     while (out.length < width) {
-      out.add('');
+      out.add(_SourceSlice.generated('', at < 0 ? 0 : at));
     }
     if (out.length > width) {
       out.removeRange(width, out.length);
@@ -122,14 +131,14 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
     return out;
   }
 
-  bool _isTableDelimiterRow(String line) {
-    final List<String> cells = _splitTableRow(line);
+  bool _isTableDelimiterRow(_SourceSlice line) {
+    final List<_SourceSlice> cells = _splitTableRowSlices(line);
     if (cells.isEmpty) {
       return false;
     }
 
-    for (final String cell in cells) {
-      final String normalized = cell.replaceAll(' ', '');
+    for (final _SourceSlice cell in cells) {
+      final String normalized = cell.text.replaceAll(' ', '');
       if (!RegExp(r'^:?-+:?$').hasMatch(normalized)) {
         return false;
       }
@@ -137,14 +146,19 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
     return true;
   }
 
-  List<String> _splitTableRow(String line) {
-    final String value = line.trim();
+  /// Cells with their origins. The `String` view above is this, flattened —
+  /// one implementation, so a cell's text and a cell's position can never
+  /// come from two different splits.
+  List<_SourceSlice> _splitTableRowSlices(_SourceSlice line) {
+    final _SourceSlice slice = line.trim();
+    final String value = slice.text;
     if (!value.contains('|')) {
-      return <String>[];
+      return <_SourceSlice>[];
     }
 
-    final List<String> cells = <String>[];
-    final StringBuffer current = StringBuffer();
+    final List<_SourceSlice> cells = <_SourceSlice>[];
+    final _SliceBuilder current = _SliceBuilder();
+    int at(int index) => slice.offsets[index];
     int codeFenceLength = 0;
     String? latexEndDelimiter;
     bool escaped = false;
@@ -153,19 +167,19 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
       final String ch = value[i];
 
       if (escaped) {
-        current.write(ch);
+        current.writeFrom(ch, at(i));
         escaped = false;
         continue;
       }
 
       if (latexEndDelimiter != null) {
         if (value.startsWith(latexEndDelimiter, i)) {
-          current.write(latexEndDelimiter);
+          current.writeFrom(latexEndDelimiter, at(i));
           i += latexEndDelimiter.length - 1;
           latexEndDelimiter = null;
           continue;
         }
-        current.write(ch);
+        current.writeFrom(ch, at(i));
         continue;
       }
 
@@ -175,19 +189,19 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
           latexEndDelimiter = endDelimiter;
         }
         escaped = true;
-        current.write(ch);
+        current.writeFrom(ch, at(i));
         continue;
       }
 
       if (ch == r'$') {
         if (value.startsWith(r'$$', i)) {
           latexEndDelimiter = r'$$';
-          current.write(r'$$');
+          current.writeFrom(r'$$', at(i));
           i += 1;
           continue;
         }
         latexEndDelimiter = r'$';
-        current.write(ch);
+        current.writeFrom(ch, at(i));
         continue;
       }
 
@@ -203,20 +217,20 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
           codeFenceLength = 0;
         }
 
-        current.write(value.substring(i, i + runLength));
+        current.writeFrom(value.substring(i, i + runLength), at(i));
         i += runLength - 1;
         continue;
       }
 
       if (ch == '|' && codeFenceLength == 0) {
-        cells.add(current.toString().trim());
+        cells.add(current.build().trim());
         current.clear();
         continue;
       }
 
-      current.write(ch);
+      current.writeFrom(ch, at(i));
     }
-    cells.add(current.toString().trim());
+    cells.add(current.build().trim());
 
     if (value.startsWith('|') && cells.isNotEmpty && cells.first.isEmpty) {
       cells.removeAt(0);
@@ -226,7 +240,7 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
     }
 
     return cells
-        .map((String cell) => cell.replaceAll(r'\|', '|'))
+        .map((_SourceSlice cell) => cell.withoutPipeEscapes())
         .toList(growable: false);
   }
 

@@ -12,6 +12,8 @@ final class WithheldMarkdownRegions {
   const WithheldMarkdownRegions({
     required this.safeEndCodeUnits,
     required this.hiddenCodeUnitRanges,
+    required this.visibleText,
+    required this.visibleSourceOffsets,
   });
 
   /// Length of the longest prefix of the source that can be drawn without
@@ -24,6 +26,28 @@ final class WithheldMarkdownRegions {
   /// non-overlapping. `[start, end)`, in the same code-unit coordinates.
   final List<(int start, int end)> hiddenCodeUnitRanges;
 
+  /// The text a reader actually sees, with the syntax that produced it gone.
+  ///
+  /// `**bold**` contributes `bold`; a link contributes its label; a suppressed
+  /// tag contributes nothing. Blocks are separated by a single newline.
+  ///
+  /// This is not the source with ranges cut out of it. Cutting joins whatever
+  /// sat either side of a removed range, and the join can read as syntax the
+  /// scan never saw — `Hi [a]<i></i>(https://x)` becomes `Hi [a](https://x)`,
+  /// a link that exists in no version of the input. Anything that re-parses
+  /// such a string then disagrees with the screen.
+  final String visibleText;
+
+  /// For each code unit of [visibleText], where it came from in the source.
+  ///
+  /// Same length as [visibleText]. This is the half that cannot be recovered
+  /// afterwards: given only the visible text, a caller has to align it back to
+  /// the source by guessing, and a guess that fails is indistinguishable from
+  /// one that succeeds.
+  ///
+  /// Characters with no verbatim source — an image's alt text, a footnote
+  /// marker — all report the start of the construct that produced them.
+  final List<int> visibleSourceOffsets;
 }
 
 /// Report which parts of [source] a renderer would refuse to draw.
@@ -35,23 +59,60 @@ final class WithheldMarkdownRegions {
 /// coordinates depend on which parser the caller happened to use. Everything
 /// here is measured in one unit against one string.
 ///
-/// Every flag here means exactly what it means on
+/// [hideLinkReferenceDefinitions] says the caller suppresses the DRAWING of
+/// those blocks while still handing them to the renderer — what the mobile
+/// adapter does, so its references keep resolving while the definition itself
+/// stays off the screen.
+///
+/// It therefore removes the block from the projection and NOT from the
+/// reference map. The default renderer draws the block, so the analysis cannot
+/// decide this on its own; a caller that hides it and does not say so gets a
+/// report describing text that is not on its screen.
+///
+/// Every other flag here means exactly what it means on
 /// [StreamingMarkdownRenderView] — including
 /// [allowUnclosedInlineDelimiters], which changes where emphasis ends and so
 /// changes where a nested scan reports from. Pass the same values the view is
 /// configured with, or the two answers describe different renderings, and
 /// nothing observes the difference.
+///
+/// ## What this describes, exactly
+///
+/// It describes what the DEFAULT rendering of [source] paints. That is less
+/// than "what your widget paints", in two ways that no flag can close, because
+/// this takes a string and the view takes blocks:
+///
+///  * **A `blockBuilder` that replaces text.** The builder can return any
+///    widget for any block; this cannot see it. A builder that only wraps or
+///    decorates the default widget is fine, and so is one that adds chrome —
+///    a typing cursor is not part of the answer's text. A builder that HIDES a
+///    block or paints different words makes this report wrong for that block,
+///    and the caller has to tell it so. [hideLinkReferenceDefinitions] is that
+///    channel for the one case in this repo; there is no general one.
+///  * **Definitions nested inside a container.** This walks the top-level
+///    blocks of its own parse. A footnote definition inside a quote —
+///    `> [^a]: body` — is not found here, while a renderer handed flattened
+///    nodes from the native parser does find it and numbers the reference from
+///    it. The reference then paints `1` and this reports `a`.
+///
+/// Both are the same shape and have the same real fix: be HANDED the blocks
+/// and the builder the renderer got, rather than re-deriving a document from
+/// the source. That is a bigger change than this scan, and it is written down
+/// rather than half-done here.
 WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   String source, {
   bool withholdIncompleteDestinations = true,
   bool suppressRawHtml = true,
   bool sourceComplete = false,
   bool allowUnclosedInlineDelimiters = false,
+  bool hideLinkReferenceDefinitions = false,
 }) {
   if (source.isEmpty) {
     return const WithheldMarkdownRegions(
       safeEndCodeUnits: 0,
       hiddenCodeUnitRanges: <(int, int)>[],
+      visibleText: '',
+      visibleSourceOffsets: <int>[],
     );
   }
 
@@ -67,12 +128,46 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   // remainder of such a message; a lone CR does not occur in the content this
   // is built for, and over-hiding is the direction that cannot leak.
   final int loneCarriageReturn = _firstLoneCarriageReturn(source);
-  final RopeString rope = RopeString()..append(source);
+  // Parse only as far as the analysis is willing to speak for.
+  //
+  // The boundary is known BEFORE parsing, and parsing past it bought nothing
+  // but trouble: a block spanning the CR went on projecting its whole
+  // remainder, and clipping the result afterwards needed the run's source
+  // extent — which generated text does not have, because it reports one
+  // position for its whole run. Two rounds of review went into carrying that
+  // extent alongside the ledger, and it grew a tax each time: keeping it in
+  // step with edge-trimming, then needing a finer granularity than the piece.
+  //
+  // Truncating removes the question. Nothing downstream can produce text from
+  // past the boundary, because it never sees any.
+  final String analyzed = loneCarriageReturn == -1
+      ? source
+      : source.substring(0, loneCarriageReturn);
+  final RopeString rope = RopeString()..append(analyzed);
   final MarkdownDocument document = const RopeMarkdownParser().parse(rope);
 
   // Definitions first: a reference link whose definition has not arrived is an
   // unresolved destination, and that is decided by the whole document, not by
   // the block the reference sits in.
+  final StreamingMarkdownRenderView projections =
+      _projectionsView(suppressRawHtml: suppressRawHtml);
+
+  // Same numbering the renderer assigns: definitions in document order. It is
+  // derivable here after all — the earlier note that this scan cannot know it
+  // was wrong, and a footnote reference paints a character either way (the
+  // number, or the id when there is no definition).
+  final Map<String, int> footnoteNumbers = <String, int>{};
+  for (final MarkdownBlockNode block in document.blocks) {
+    for (final _FootnoteDefinition definition in projections
+        ._parseFootnoteDefinitions(source.substring(block.start, block.end))) {
+      final String key = _normalizeFootnoteKey(definition.id);
+      if (key.isEmpty || footnoteNumbers.containsKey(key)) {
+        continue;
+      }
+      footnoteNumbers[key] = footnoteNumbers.length + 1;
+    }
+  }
+
   final Map<String, String> references = <String, String>{};
   for (final MarkdownBlockNode block in document.blocks) {
     if (block is GenericBlockNode &&
@@ -85,12 +180,102 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   }
 
   final List<(int, int)> hidden = <(int, int)>[];
+  final List<int> visibleUnits = <int>[];
+  final List<int> visibleOffsets = <int>[];
+
   int safeEnd = loneCarriageReturn == -1 ? source.length : loneCarriageReturn;
 
+  // Blocks are separated by one newline in the visible text. It comes from no
+  // single source character, so it reports the end of the block it follows —
+  // monotonic, and never inside anything.
+  // Block spacing is decided HERE and nowhere else. A block's own slice ends
+  // with the newline that terminated it, and the renderer draws that as part
+  // of the block, not as a gap — so trailing newlines are dropped and this is
+  // the single place a gap comes from. Otherwise the two sources of newline
+  // add up and the visible text has gaps the screen does not.
+  int blockStart = 0;
+
+  void endBlock() {
+    // Trailing first, then leading: a block whose tags were suppressed can
+    // start with the line break that followed the opening tag, and that is a
+    // gap for the same reason the trailing one is.
+    while (visibleUnits.length > blockStart &&
+        visibleUnits.last == 10 /* \n */) {
+      visibleUnits.removeLast();
+      visibleOffsets.removeLast();
+    }
+    while (visibleUnits.length > blockStart &&
+        visibleUnits[blockStart] == 10) {
+      visibleUnits.removeAt(blockStart);
+      visibleOffsets.removeAt(blockStart);
+    }
+  }
+
+  // Deferred: a block that turns out to paint nothing must not leave a gap
+  // behind it. Emitting the separator up front gave a tag-only HTML block one
+  // newline and the block after it another, which shifted every later offset.
+  bool separatorPending = false;
+
+  /// [nextOffset] is where the character about to be appended came from.
+  ///
+  /// The separator wants to sit just after the block it follows rather than at
+  /// the start of the next one, so that a cursor reading it does not jump the
+  /// blank source between them before accounting for the separator itself.
+  /// But "just after" was computed as `last + 1` and nothing checked it
+  /// against where the next character actually is — and the caller knows,
+  /// because it is appending that character. When the preceding piece is
+  /// generated text (a header, a label: one position repeated for its whole
+  /// run) and the next piece begins at that same position, `last + 1` steps
+  /// PAST it and the ledger goes backwards, which is the one thing a reveal
+  /// cursor cannot survive.
+  ///
+  /// So it is told, instead of guessing.
+  void flushSeparator(int nextOffset) {
+    if (!separatorPending) {
+      return;
+    }
+    separatorPending = false;
+    if (visibleUnits.isNotEmpty) {
+      visibleUnits.add(10);
+      final int after = visibleOffsets.last + 1;
+      visibleOffsets.add(after < nextOffset ? after : nextOffset);
+    }
+    blockStart = visibleUnits.length;
+  }
+
+  void separateBlocks() {
+    endBlock();
+    separatorPending = true;
+  }
+
+  void keepVerbatimEdges() {
+    // A code block's blank first line is content. `endBlock` strips leading and
+    // trailing newlines because for every OTHER block they are the gap between
+    // blocks; pinning the boundary here keeps it away from this one.
+    blockStart = visibleUnits.length;
+  }
+
+  void addUnit(int unit, int sourceOffset) {
+    flushSeparator(sourceOffset);
+    visibleUnits.add(unit);
+    visibleOffsets.add(sourceOffset);
+  }
+
+  void addSlice(_SourceSlice slice) {
+    for (int k = 0; k < slice.text.length; k++) {
+      addUnit(slice.text.codeUnitAt(k), slice.offsets[k]);
+    }
+  }
+
   for (final MarkdownBlockNode block in document.blocks) {
-    if (_blockHasNoInlineContent(block)) {
+    final String blockRaw = analyzed.substring(block.start, block.end);
+
+    if (hideLinkReferenceDefinitions &&
+        block is GenericBlockNode &&
+        block.type == 'link_reference_definition') {
       continue;
     }
+
     if (suppressRawHtml && _isRawTextHtmlBlock(block, source)) {
       // Nothing inside these is prose, so the block parser's extent IS the
       // hidden range — no second scan for where the element ends.
@@ -110,19 +295,118 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       sourceComplete: sourceComplete,
       allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
     );
-    final _InlineParseResult result =
-        parser.scan(source.substring(block.start, block.end));
-    for (final (int start, int end) range in result.hiddenRanges) {
-      hidden.add((block.start + range.$1, block.start + range.$2));
-    }
-    final int? withheldFrom = result.withheldFrom;
-    if (withheldFrom != null) {
-      final int boundary = block.start + withheldFrom;
-      if (boundary < safeEnd) {
-        safeEnd = boundary;
+    // THE string the renderer inline-parses for this block — not the raw
+    // slice. Scanning the raw slice was why headings kept their `#`, quotes
+    // kept their `>` and paragraphs kept hard line breaks the screen folds
+    // into spaces: the analysis was answering about a different string.
+    final _BlockProjection projection =
+        projections
+            ._planBlock(_renderNodeFor(blockRaw, block.type))
+            .projection;
+    for (final _ProjectedPiece projected in projection.pieces) {
+      final _SourceSlice inline = _rebase(projected.slice, block.start);
+      void beginPiece() {
+        if (!projected.continuesLine) {
+          separateBlocks();
+        }
+      }
+
+      if (projected.literal) {
+        // Drawn by a plain widget, so it is never inline-parsed: its own
+        // delimiters are on the screen.
+        if (inline.text.isNotEmpty) {
+          beginPiece();
+          addSlice(inline);
+        }
+        continue;
+      }
+      if (inline.isEmpty) {
+        continue;
+      }
+
+      if (projection.verbatim) {
+        // Code. Shown as-is, so its edge whitespace is content rather than
+        // block syntax — the generic trimming must not reach it.
+        beginPiece();
+        addSlice(inline);
+        keepVerbatimEdges();
+        continue;
+      }
+
+      final _InlineParseResult result = parser.scan(inline.text);
+
+      // The renderer's own fallback: with no tokens but source left over, it
+      // paints what survived suppression rather than nothing — `**<b></b>**`
+      // shows its asterisks. Mirroring it here keeps the two answers the same.
+      //
+      // It must NOT skip the range reporting below. Doing that left a comment
+      // block — every character of it suppressed, so no tokens — reporting no
+      // hidden ranges at all.
+      final bool emptyTokens = result.tokens.isEmpty;
+      if (emptyTokens && projected.emptyTokenFallback) {
+        final _SourceSlice survivors =
+            _survivingSlice(inline, result.hiddenRanges, result.withheldFrom);
+        if (survivors.text.isNotEmpty) {
+          beginPiece();
+          addSlice(survivors);
+        }
+      }
+
+      // Offsets are into `inline.text`; the slice says where each of those
+      // characters lives in the document.
+      int sourceAt(int indexInSlice) => indexInSlice < inline.offsets.length
+          ? inline.offsets[indexInSlice]
+          : inline.sourceEnd;
+
+      // Each piece is its own line on screen — a list item, a table cell, a
+      // callout title above its body — so each gets its own separator.
+      if (!emptyTokens) {
+        beginPiece();
+      }
+      for (final _InlineToken token in result.tokens) {
+        final String painted = _paintedTextOf(token, footnoteNumbers);
+        if (painted.isEmpty) {
+          continue;
+        }
+        // A token whose text is not a verbatim slice has no per-character
+        // origin, so all of it reports the construct that produced it.
+        final bool verbatim = token.isVerbatimSlice;
+        for (int k = 0; k < painted.length; k++) {
+          addUnit(painted.codeUnitAt(k),
+              sourceAt(token.visibleSourceStart + (verbatim ? k : 0)));
+        }
+      }
+      for (final (int start, int end) range in result.hiddenRanges) {
+        // Trustworthy exactly when this range's characters advance through
+        // the source. Generated text — a joining space, a label — reports one
+        // position for its whole run, so a range over it is not a range in
+        // the source and is dropped rather than reported somewhere wrong: a
+        // consumer that cuts at wrong coordinates corrupts the text, which is
+        // worse than cutting at none.
+        //
+        // Derived from the offsets themselves, so it needs no second piece of
+        // state to keep in step, and it is per-RANGE where a per-slice flag
+        // threw away every range in a piece for one generated character in it.
+        if (!_monotonic(inline.offsets, range.$1, range.$2)) {
+          continue;
+        }
+        hidden.add((sourceAt(range.$1), sourceAt(range.$2 - 1) + 1));
+      }
+      final int? withheldFrom = result.withheldFrom;
+      if (withheldFrom != null) {
+        // The piece's own start, not the block's: a list whose SECOND item
+        // holds the unfinished destination must not discard the first.
+        final int boundary = withheldFrom == 0
+            ? (inline.offsets.isEmpty ? block.start : inline.offsets.first)
+            : sourceAt(withheldFrom - 1) + 1;
+        if (boundary < safeEnd) {
+          safeEnd = boundary;
+        }
       }
     }
   }
+
+  endBlock();
 
   // Clip to the boundary rather than filtering on the start alone: a range
   // that straddles it would otherwise reach the caller with an end past the
@@ -134,9 +418,33 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     }
     clipped.add((range.$1, range.$2 > safeEnd ? safeEnd : range.$2));
   }
+  // The ledger stops where the boundary stops. It is the same report, and one
+  // that says "safe up to here" in one field while handing over text from past
+  // there in another is worse than no boundary at all — the caller that trusts
+  // the text has no way to learn the boundary was smaller.
+  //
+  // Not hypothetical. A lone CR makes the two block parsers disagree, so
+  // `safeEnd` stops at it; the code block spanning that CR went on projecting
+  // its whole remainder, and an unresolved destination after it arrived in
+  // `visibleText` with offsets 33 past the boundary.
+  //
+  // Clipped here, at the one place the report is built, rather than in each
+  // projection — a projection added later cannot get this wrong, because it
+  // does not get to decide it.
+  int ledgerEnd = visibleUnits.length;
+  for (int i = 0; i < visibleOffsets.length; i++) {
+    if (visibleOffsets[i] >= safeEnd) {
+      ledgerEnd = i;
+      break;
+    }
+  }
+
   return WithheldMarkdownRegions(
     safeEndCodeUnits: safeEnd,
     hiddenCodeUnitRanges: List<(int, int)>.unmodifiable(clipped),
+    visibleText: String.fromCharCodes(visibleUnits.take(ledgerEnd)),
+    visibleSourceOffsets:
+        List<int>.unmodifiable(visibleOffsets.take(ledgerEnd)),
   );
 }
 
@@ -175,30 +483,129 @@ bool _isRawTextHtmlOpening(String raw) {
   if (opening.startsWith('<!--')) {
     return true;
   }
-  for (final String name in const <String>['script', 'style', 'pre', 'textarea']) {
-    // `<pre>` and `<pre class=…>` are the element; `<prefix>` is not.
-    final int after = 1 + name.length;
-    if (!opening.startsWith('<$name')) {
-      continue;
-    }
-    if (after >= opening.length ||
-        !_isHtmlTagNameChar(opening.codeUnitAt(after))) {
-      return true;
-    }
-  }
-  return false;
+  return rawTextHtmlElementAt(opening) != null;
 }
 
-/// Blocks whose text is never inline-parsed, so nothing in them can leak.
+/// What this token puts on the screen.
 ///
-/// Hiding a URL that a code fence is deliberately showing would be the
-/// over-hiding failure — the one that looks like success in a leak test.
-bool _blockHasNoInlineContent(MarkdownBlockNode block) {
-  if (block is CodeFenceNode) {
-    return true;
+/// A LaTeX span shows its expression rendered, and those glyphs correspond to
+/// the expression, so it contributes that.
+///
+/// Two kinds deliberately contribute nothing, for the same reason: what they
+/// paint is not knowable from the source.
+///
+/// A footnote REFERENCE paints its number, or its id when nothing defines it —
+/// the same two cases the renderer chooses between, from the same numbering.
+///
+/// An inline IMAGE paints the image once it loads, nothing while it is
+/// loading, and a fallback line if it fails — three different screens for one
+/// source, decided at runtime. Reporting its alt text unconditionally would
+/// disagree with all three. This under-counts a failed image's fallback, and
+/// that is the honest direction: the report says less than the screen shows
+/// rather than claiming text that is usually not there.
+String _paintedTextOf(_InlineToken token, Map<String, int> footnoteNumbers) {
+  if (token.isImage) {
+    return '';
   }
-  return block is GenericBlockNode &&
-      (block.type == 'indented_code_block' ||
-          block.type == 'front_matter' ||
-          block.type == 'link_reference_definition');
+  if (token.isFootnoteReference) {
+    final int? number =
+        _footnoteNumberForId(footnoteNumbers, token.footnoteReferenceId!);
+    return number?.toString() ?? token.footnoteReferenceId!;
+  }
+  if (token.isLatex) {
+    return token.latexExpression ?? '';
+  }
+  return token.text;
 }
+
+/// A configuration-only view, used to reach the renderer's own projections.
+///
+/// They are extension methods on the view, and the analysis has to call the
+/// SAME ones — a second copy of "how a list splits into items" is the thing
+/// this file exists to stop. Constructing one costs nothing; nothing is built.
+/// `debugMarkdownForSelectedPlainText` reaches them the same way.
+StreamingMarkdownRenderView _projectionsView({required bool suppressRawHtml}) =>
+    StreamingMarkdownRenderView(
+      nodes: const <MarkdownRenderNode>[],
+      // The projection branches on this exactly as the painting does, so the
+      // view has to be configured the way the caller configured the renderer.
+      suppressRawHtml: suppressRawHtml,
+    );
+
+MarkdownRenderNode _renderNodeFor(String raw, String type) =>
+    MarkdownRenderNode(
+      type: type,
+      depth: 0,
+      startByte: 0,
+      endByte: raw.length,
+      startRow: 0,
+      endRow: 0,
+      raw: raw,
+      content: raw,
+    );
+
+
+/// The projection is computed against the block's own slice, so its offsets
+/// start at zero. Shift them to where the block sits in the document.
+_SourceSlice _rebase(_SourceSlice slice, int blockStart) => _SourceSlice(
+      slice.text,
+      slice.offsets.map((int at) => at + blockStart).toList(growable: false),
+      located: slice.located,
+    );
+
+/// What survives suppression when the scan produced no tokens.
+///
+/// The same characters `_InlineParseResult.visibleSourceOf` gives the
+/// renderer, kept as a slice so they still say where they came from.
+_SourceSlice _survivingSlice(
+  _SourceSlice piece,
+  List<(int, int)> hiddenRanges,
+  int? withheldFrom,
+) {
+  final int end = withheldFrom ?? piece.text.length;
+  final StringBuffer text = StringBuffer();
+  final List<int> offsets = <int>[];
+  int cursor = 0;
+  void take(int from, int to) {
+    for (int i = from; i < to && i < piece.text.length; i++) {
+      text.writeCharCode(piece.text.codeUnitAt(i));
+      offsets.add(piece.offsets[i]);
+    }
+  }
+
+  for (final (int start, int stop) range in hiddenRanges) {
+    if (range.$1 >= end) {
+      break;
+    }
+    if (range.$1 > cursor) {
+      take(cursor, range.$1);
+    }
+    cursor = range.$2 > cursor ? range.$2 : cursor;
+  }
+  if (cursor < end) {
+    take(cursor, end);
+  }
+  return _SourceSlice(text.toString(), offsets);
+}
+
+/// Whether `offsets[start..end)` advance through the source.
+///
+/// STRICTLY increasing, not "differ by exactly one". A deletion leaves a gap —
+/// normalization drops the `\r` of a CRLF, and a tag spanning one is still a
+/// single run of source — while GENERATED text repeats one position for its
+/// whole run. Requiring +1 rejected the first along with the second, and the
+/// suppressed tag's range went unreported.
+bool _monotonic(List<int> offsets, int start, int end) {
+  if (start < 0 || end > offsets.length || start >= end) {
+    return false;
+  }
+  for (int i = start + 1; i < end; i++) {
+    if (offsets[i] <= offsets[i - 1]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+
+
