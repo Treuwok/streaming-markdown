@@ -315,4 +315,17 @@ void main() {
     // ` ```dart linenums ` paints `dart`, not the whole info string.
     expect(_scan('```dart linenums\nx\n```').visibleText, 'dart\nx');
   });
+
+  test('a footnote reference reports the label it paints (codex R6)', () {
+    // The renderer paints the assigned number, or the id when nothing defines
+    // it. Both are derivable here — the earlier claim that this scan cannot
+    // know the numbering was wrong.
+    expect(_scan('note[^a]\n\n[^a]: body').visibleText, 'note1\na: body');
+    expect(_scan('note[^undefined]').visibleText, 'noteundefined');
+  });
+
+  test('an empty fence paints nothing, header included (codex R6)', () {
+    // The code widget returns early on an empty body, before its header.
+    expect(_scan('```dart\n```').visibleText, isEmpty);
+  });
 }

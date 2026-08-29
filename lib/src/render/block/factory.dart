@@ -86,7 +86,9 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
         final _SourceSlice body = _codeSlice(node.raw, 0, node.type);
         return _BlockProjection(
           <_SourceSlice>[
-            if (language.isNotEmpty)
+            // The code widget returns early on an empty body, before it paints
+            // its header — so an empty fence with a language shows nothing.
+            if (language.isNotEmpty && body.text.isNotEmpty)
               indented
                   // Generated: the word is not in the source at all.
                   ? _SourceSlice.generated(language, 0)

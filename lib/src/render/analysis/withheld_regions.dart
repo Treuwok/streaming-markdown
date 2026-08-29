@@ -110,6 +110,25 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   // Definitions first: a reference link whose definition has not arrived is an
   // unresolved destination, and that is decided by the whole document, not by
   // the block the reference sits in.
+  final StreamingMarkdownRenderView projections =
+      _projectionsView(suppressRawHtml: suppressRawHtml);
+
+  // Same numbering the renderer assigns: definitions in document order. It is
+  // derivable here after all — the earlier note that this scan cannot know it
+  // was wrong, and a footnote reference paints a character either way (the
+  // number, or the id when there is no definition).
+  final Map<String, int> footnoteNumbers = <String, int>{};
+  for (final MarkdownBlockNode block in document.blocks) {
+    for (final _FootnoteDefinition definition in projections
+        ._parseFootnoteDefinitions(source.substring(block.start, block.end))) {
+      final String key = _normalizeFootnoteKey(definition.id);
+      if (key.isEmpty || footnoteNumbers.containsKey(key)) {
+        continue;
+      }
+      footnoteNumbers[key] = footnoteNumbers.length + 1;
+    }
+  }
+
   final Map<String, String> references = <String, String>{};
   for (final MarkdownBlockNode block in document.blocks) {
     if (block is GenericBlockNode &&
@@ -121,8 +140,6 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     }
   }
 
-  final StreamingMarkdownRenderView projections =
-      _projectionsView(suppressRawHtml: suppressRawHtml);
   final List<(int, int)> hidden = <(int, int)>[];
   final List<int> visibleUnits = <int>[];
   final List<int> visibleOffsets = <int>[];
@@ -267,7 +284,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       // callout title above its body — so each gets its own separator.
       separateBlocks();
       for (final _InlineToken token in result.tokens) {
-        final String painted = _paintedTextOf(token);
+        final String painted = _paintedTextOf(token, footnoteNumbers);
         if (painted.isEmpty) {
           continue;
         }
@@ -386,8 +403,8 @@ bool _isRawTextHtmlOpening(String raw) {
 /// Two kinds deliberately contribute nothing, for the same reason: what they
 /// paint is not knowable from the source.
 ///
-/// A footnote REFERENCE paints a number, and the numbering is assigned by the
-/// renderer from the whole document, which this scan does not have.
+/// A footnote REFERENCE paints its number, or its id when nothing defines it —
+/// the same two cases the renderer chooses between, from the same numbering.
 ///
 /// An inline IMAGE paints the image once it loads, nothing while it is
 /// loading, and a fallback line if it fails — three different screens for one
@@ -395,9 +412,14 @@ bool _isRawTextHtmlOpening(String raw) {
 /// disagree with all three. This under-counts a failed image's fallback, and
 /// that is the honest direction: the report says less than the screen shows
 /// rather than claiming text that is usually not there.
-String _paintedTextOf(_InlineToken token) {
-  if (token.isImage || token.isFootnoteReference) {
+String _paintedTextOf(_InlineToken token, Map<String, int> footnoteNumbers) {
+  if (token.isImage) {
     return '';
+  }
+  if (token.isFootnoteReference) {
+    final int? number =
+        _footnoteNumberForId(footnoteNumbers, token.footnoteReferenceId!);
+    return number?.toString() ?? token.footnoteReferenceId!;
   }
   if (token.isLatex) {
     return token.latexExpression ?? '';
