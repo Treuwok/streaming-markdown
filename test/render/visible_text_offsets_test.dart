@@ -240,19 +240,21 @@ void main() {
     });
   });
 
-  test('a rewritten cell reports no ranges rather than wrong ones', () {
-    // Table parsing turns `\\|` into `|`, so the cell is not a slice of the
-    // source and nothing inside it has a real position. The suppressed tag is
-    // absent from the visible text either way; what must NOT happen is a range
-    // pointing somewhere else, which a consumer would cut at.
-    const String source =
-        '| a \\| <a href="https://secret.example">x</a> | b |\n'
+  test('an escaped pipe keeps the cell located', () {
+    // `\\|` used to be turned into `|` by a string replace — a REWRITE, which
+    // left the cell unable to say where anything in it came from, so ranges
+    // inside it had to be suppressed. Dropping the backslash is a DELETION,
+    // so the surviving pipe keeps its own position and the tag's range lands
+    // exactly on the tag.
+    const String source = '| a \\| <a href="https://secret.example">x</a> | b |\n'
         '| --- | --- |\n| c | d |';
     final WithheldMarkdownRegions r = _scan(source);
-    expect(r.visibleText, isNot(contains('secret.example')));
-    for (final (int, int) range in r.hiddenCodeUnitRanges) {
-      expect(source.substring(range.$1, range.$2), isNot(contains('a href')),
-          reason: 'a range here would be at the wrong place');
-    }
+    expect(r.visibleText, 'a | x\nb\nc\nd');
+    expect(
+      r.hiddenCodeUnitRanges
+          .map(((int, int) g) => source.substring(g.$1, g.$2))
+          .toList(),
+      <String>['<a href="https://secret.example">', '</a>'],
+    );
   });
 }

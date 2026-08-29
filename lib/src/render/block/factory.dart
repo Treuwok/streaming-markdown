@@ -53,10 +53,8 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
         if (_parseFootnoteDefinitions(normalizedRaw).isNotEmpty) {
           return _definitionProjection(node);
         }
-        final List<String>? cells = _tableCellsOrNull(normalizedRaw);
-        if (cells != null) {
-          return _BlockProjection(
-              _orderedSlices(_normalizedSlice(node.raw, 0), cells));
+        if (_tableCellsOrNull(normalizedRaw) != null) {
+          return _BlockProjection(_tableCellSlices(node));
         }
         return _BlockProjection(<_SourceSlice>[paragraph]);
       case 'list':
@@ -94,12 +92,10 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
       case 'table':
       case 'pipe_table_header':
       case 'pipe_table_row':
-        final List<String> cells =
-            _tableCellsOrNull(_normalizedRaw(node.raw), loose: true) ??
-                const <String>[];
+        final List<_SourceSlice> cells = _tableCellSlices(node);
         return _BlockProjection(cells.isEmpty
             ? <_SourceSlice>[_contentOrRawSlice(node)]
-            : _orderedSlices(_normalizedSlice(node.raw, 0), cells));
+            : cells);
       case 'html_block':
         if (suppressRawHtml) {
           if (_isRawTextHtmlOpening(node.raw)) {
@@ -142,6 +138,25 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
       pieces.add(source.trim());
     }
     return _BlockProjection(pieces);
+  }
+
+  /// Cells in render order, split by the SAME function the table widget
+  /// splits with, so a cell's position comes from the split rather than from
+  /// searching the block for its text afterwards.
+  List<_SourceSlice> _tableCellSlices(MarkdownRenderNode node) {
+    final List<_SourceSlice> cells = <_SourceSlice>[];
+    for (final _SourceSlice line in _normalizedSlice(node.raw, 0).splitLines()) {
+      final String trimmed = line.text.trim();
+      if (trimmed.isEmpty || !trimmed.contains('|')) {
+        continue;
+      }
+      if (RegExp(r'^\s*\|?[\s:|-]+\|?\s*$').hasMatch(trimmed)) {
+        continue; // the delimiter row paints nothing
+      }
+      cells.addAll(_splitTableRowSlices(line)
+          .where((_SourceSlice cell) => cell.text.isNotEmpty));
+    }
+    return cells;
   }
 
   List<String>? _tableCellsOrNull(String normalizedRaw, {bool loose = false}) {

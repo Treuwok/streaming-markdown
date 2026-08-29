@@ -137,14 +137,23 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
     return true;
   }
 
-  List<String> _splitTableRow(String line) {
-    final String value = line.trim();
+  List<String> _splitTableRow(String line) => _splitTableRowSlices(
+        _SourceSlice.whole(line, 0),
+      ).map((_SourceSlice cell) => cell.text).toList(growable: false);
+
+  /// Cells with their origins. The `String` view above is this, flattened —
+  /// one implementation, so a cell's text and a cell's position can never
+  /// come from two different splits.
+  List<_SourceSlice> _splitTableRowSlices(_SourceSlice line) {
+    final _SourceSlice slice = line.trim();
+    final String value = slice.text;
     if (!value.contains('|')) {
-      return <String>[];
+      return <_SourceSlice>[];
     }
 
-    final List<String> cells = <String>[];
-    final StringBuffer current = StringBuffer();
+    final List<_SourceSlice> cells = <_SourceSlice>[];
+    final _SliceBuilder current = _SliceBuilder();
+    int at(int index) => slice.offsets[index];
     int codeFenceLength = 0;
     String? latexEndDelimiter;
     bool escaped = false;
@@ -153,19 +162,19 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
       final String ch = value[i];
 
       if (escaped) {
-        current.write(ch);
+        current.writeFrom(ch, at(i));
         escaped = false;
         continue;
       }
 
       if (latexEndDelimiter != null) {
         if (value.startsWith(latexEndDelimiter, i)) {
-          current.write(latexEndDelimiter);
+          current.writeFrom(latexEndDelimiter, at(i));
           i += latexEndDelimiter.length - 1;
           latexEndDelimiter = null;
           continue;
         }
-        current.write(ch);
+        current.writeFrom(ch, at(i));
         continue;
       }
 
@@ -175,19 +184,19 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
           latexEndDelimiter = endDelimiter;
         }
         escaped = true;
-        current.write(ch);
+        current.writeFrom(ch, at(i));
         continue;
       }
 
       if (ch == r'$') {
         if (value.startsWith(r'$$', i)) {
           latexEndDelimiter = r'$$';
-          current.write(r'$$');
+          current.writeFrom(r'$$', at(i));
           i += 1;
           continue;
         }
         latexEndDelimiter = r'$';
-        current.write(ch);
+        current.writeFrom(ch, at(i));
         continue;
       }
 
@@ -203,20 +212,20 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
           codeFenceLength = 0;
         }
 
-        current.write(value.substring(i, i + runLength));
+        current.writeFrom(value.substring(i, i + runLength), at(i));
         i += runLength - 1;
         continue;
       }
 
       if (ch == '|' && codeFenceLength == 0) {
-        cells.add(current.toString().trim());
+        cells.add(current.build().trim());
         current.clear();
         continue;
       }
 
-      current.write(ch);
+      current.writeFrom(ch, at(i));
     }
-    cells.add(current.toString().trim());
+    cells.add(current.build().trim());
 
     if (value.startsWith('|') && cells.isNotEmpty && cells.first.isEmpty) {
       cells.removeAt(0);
@@ -226,7 +235,7 @@ extension _StreamingMarkdownTableTextParsing on StreamingMarkdownRenderView {
     }
 
     return cells
-        .map((String cell) => cell.replaceAll(r'\|', '|'))
+        .map((_SourceSlice cell) => cell.withoutPipeEscapes())
         .toList(growable: false);
   }
 

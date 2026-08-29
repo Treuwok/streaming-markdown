@@ -130,6 +130,29 @@ final class _SourceSlice {
   static _SourceSlice generated(String text, int at) =>
       _SourceSlice(text, List<int>.filled(text.length, at), located: false);
 
+  /// Drops the backslash of an escaped pipe, keeping the pipe.
+  ///
+  /// As a string this was `replaceAll(r'\|', '|')` — a REWRITE, which left the
+  /// result unable to say where anything in it came from. As a deletion the
+  /// surviving `|` keeps its own position and the cell stays located.
+  _SourceSlice withoutPipeEscapes() {
+    if (!text.contains('\\|')) {
+      return this;
+    }
+    final StringBuffer kept = StringBuffer();
+    final List<int> keptOffsets = <int>[];
+    for (int i = 0; i < text.length; i++) {
+      if (text.codeUnitAt(i) == 92 /* backslash */ &&
+          i + 1 < text.length &&
+          text.codeUnitAt(i + 1) == 124 /* | */) {
+        continue;
+      }
+      kept.writeCharCode(text.codeUnitAt(i));
+      keptOffsets.add(offsets[i]);
+    }
+    return _SourceSlice(kept.toString(), keptOffsets, located: located);
+  }
+
   /// Drops the trailing characters [pattern] matches at the end of [text].
   _SourceSlice stripTrailing(RegExp pattern) {
     final Iterable<RegExpMatch> matches = pattern.allMatches(text);
@@ -359,4 +382,48 @@ _SourceSlice _contentOrRawSliceOf(String raw, int rawStart, String content) {
     );
   }
   return _normalizedSlice(raw, rawStart).trim();
+}
+
+/// Builds a [_SourceSlice] one character at a time, remembering where each
+/// came from.
+///
+/// The projections that split a block into pieces are character loops that
+/// write into a `StringBuffer`. Writing into this instead is the whole change
+/// needed to keep their origins: the index being read is already in hand at
+/// every write, and it was only being thrown away because the buffer had
+/// nowhere to put it.
+class _SliceBuilder {
+  final StringBuffer _text = StringBuffer();
+  final List<int> _offsets = <int>[];
+  bool _located = true;
+
+  bool get isEmpty => _offsets.isEmpty;
+  int get length => _offsets.length;
+
+  /// Appends [text], every character of it coming from [at] onward.
+  void writeFrom(String text, int at) {
+    for (int k = 0; k < text.length; k++) {
+      _text.writeCharCode(text.codeUnitAt(k));
+      _offsets.add(at + k);
+    }
+  }
+
+  /// Appends [text] as a single source position — for a character the
+  /// projection produced rather than copied, such as the `|` an escaped `\|`
+  /// becomes.
+  void writeGenerated(String text, int at) {
+    for (int k = 0; k < text.length; k++) {
+      _text.writeCharCode(text.codeUnitAt(k));
+      _offsets.add(at);
+    }
+  }
+
+  void clear() {
+    _text.clear();
+    _offsets.clear();
+    _located = true;
+  }
+
+  _SourceSlice build() =>
+      _SourceSlice(_text.toString(), List<int>.of(_offsets), located: _located);
 }
