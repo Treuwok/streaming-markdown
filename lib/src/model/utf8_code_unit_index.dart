@@ -77,3 +77,35 @@ class Utf8CodeUnitIndex {
     return low;
   }
 }
+
+/// Splits a stream chunk so a surrogate pair is never handed over in halves.
+///
+/// A non-BMP character is two UTF-16 code units in a Dart string and one
+/// four-byte scalar in UTF-8. A consumer that encodes each chunk on its own —
+/// which is what handing a chunk to a native parser does — turns each half of
+/// a split pair into a replacement character instead: three bytes, twice. The
+/// accumulated Dart string then says four bytes where the consumer's buffer
+/// says six, and every offset after that point translates against a table that
+/// is too short.
+///
+/// So the trailing half waits for its other half. One character arrives one
+/// chunk later than it could have, and half of one never arrives at all —
+/// which is the correct number, because half a surrogate pair is not a
+/// character.
+({String send, String carry}) splitOffPendingSurrogate(
+  String carry,
+  String chunk,
+) {
+  final String joined = carry.isEmpty ? chunk : carry + chunk;
+  if (joined.isEmpty) {
+    return (send: '', carry: '');
+  }
+  final int last = joined.codeUnitAt(joined.length - 1);
+  if (last >= 0xD800 && last <= 0xDBFF) {
+    return (
+      send: joined.substring(0, joined.length - 1),
+      carry: joined.substring(joined.length - 1),
+    );
+  }
+  return (send: joined, carry: '');
+}

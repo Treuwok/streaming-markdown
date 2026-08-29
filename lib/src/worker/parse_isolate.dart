@@ -10,6 +10,8 @@ void _parseWorkerMain(SendPort mainSendPort) {
   // The document the NATIVE parser has accumulated. Its node offsets are
   // relative to this, not to whichever chunk arrived last.
   final StringBuffer nativeSource = StringBuffer();
+  // A trailing high surrogate held back so native never encodes half a pair.
+  String nativeCarry = '';
 
   if (isStreamingMarkdownNativeLibraryAvailable) {
     try {
@@ -43,23 +45,30 @@ void _parseWorkerMain(SendPort mainSendPort) {
 
       String mode = 'fallback-dart';
       if (nativeAvailable && incremental != null) {
+        // The native parser accumulates; `text` is only what arrived this
+        // time. Its node offsets are into the WHOLE document, so translating
+        // them needs the whole document — an index built from the chunk clamps
+        // every offset past it and corrupts the ranges for ASCII too.
+        //
+        // What is sent and what is remembered must be the SAME text, including
+        // when a surrogate pair straddles two chunks: native encodes each
+        // chunk on its own and would turn the halves into two replacement
+        // characters, six bytes where the joined string is four.
+        if (op != 'append') {
+          nativeSource.clear();
+          nativeCarry = '';
+        }
+        final ({String send, String carry}) chunk =
+            splitOffPendingSurrogate(nativeCarry, text);
+        nativeCarry = chunk.carry;
+
         final bool ok = op == 'append'
-            ? incremental.appendText(text)
-            : incremental.setText(text);
+            ? incremental.appendText(chunk.send)
+            : incremental.setText(chunk.send);
         if (!ok) {
           throw StateError('Native incremental parse failed');
         }
-        // The native parser accumulates; `text` is only what arrived this
-        // time. Its node offsets are into the WHOLE document, so translating
-        // them needs the whole document — building the index from the chunk
-        // clamps every offset past it and corrupts the ranges for ASCII too.
-        if (op == 'append') {
-          nativeSource.write(text);
-        } else {
-          nativeSource
-            ..clear()
-            ..write(text);
-        }
+        nativeSource.write(chunk.send);
         mode = op == 'append' ? 'incremental-append' : 'full-set';
       } else {
         if (op == 'append') {

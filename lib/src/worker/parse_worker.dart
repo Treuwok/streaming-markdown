@@ -323,6 +323,9 @@ class MarkdownSyncParser {
   /// when there is no native parser.
   final StringBuffer _nativeSource = StringBuffer();
 
+  /// A trailing high surrogate held back so native never encodes half a pair.
+  String _nativeCarry = '';
+
   /// Parses a complete markdown string without keeping parser state.
   static StreamingMarkdownParseResult parseMarkdown(
     String markdown, {
@@ -385,20 +388,26 @@ class MarkdownSyncParser {
     String mode;
     final NativeIncrementalMarkdownParser? native = _native;
     if (_nativeAvailable && native != null) {
-      final bool ok =
-          op == 'append' ? native.appendText(text) : native.setText(text);
+      // Same reasons as the isolate: the native parser accumulates, so its
+      // node offsets are into the whole document while `text` is only this
+      // chunk — and a surrogate pair straddling two chunks would reach native
+      // as two replacement characters while the remembered string joins it.
+      if (op != 'append') {
+        _nativeSource.clear();
+    _nativeCarry = '';
+        _nativeCarry = '';
+      }
+      final ({String send, String carry}) chunk =
+          splitOffPendingSurrogate(_nativeCarry, text);
+      _nativeCarry = chunk.carry;
+
+      final bool ok = op == 'append'
+          ? native.appendText(chunk.send)
+          : native.setText(chunk.send);
       if (!ok) {
         throw StateError('Native incremental parse failed');
       }
-      // Same reason as the isolate: the native parser accumulates, so its node
-      // offsets are into the whole document while `text` is only this chunk.
-      if (op == 'append') {
-        _nativeSource.write(text);
-      } else {
-        _nativeSource
-          ..clear()
-          ..write(text);
-      }
+      _nativeSource.write(chunk.send);
       mode = op == 'append' ? 'sync-incremental-append' : 'sync-full-set';
     } else {
       if (op == 'append') {
