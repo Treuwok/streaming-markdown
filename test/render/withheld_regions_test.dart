@@ -242,6 +242,56 @@ void main() {
       expect(source.substring(0, regions.safeEndCodeUnits),
           isNot(contains('secret.example')));
 
+      // The boundary goes to the BLOCK's start, not to the CR — the block is
+      // skipped, so nothing in it was scanned, and stopping at the CR would
+      // declare the unscanned part before it safe. That is not theoretical:
+      // this exact source handed the destination to the caller.
+      expect(
+        analyzeWithheldMarkdownRegionsOfSource(
+                '[x](https://secret.example\rmore')
+            .safeEndCodeUnits,
+        0,
+      );
+
+      // A `\r` that is the last code unit received is NOT a lone CR while the
+      // source is still arriving — it is half of a CRLF that has not finished.
+      // Calling it lone blanks the block being typed for one frame, and a
+      // chunk boundary between `\r` and `\n` is ordinary.
+      expect(
+        analyzeWithheldMarkdownRegionsOfSource('first para\n\nsecond\r')
+            .safeEndCodeUnits,
+        'first para\n\nsecond\r'.length,
+      );
+      expect(
+        analyzeWithheldMarkdownRegionsOfSource('first para\n\nsecond\r',
+                sourceComplete: true)
+            .safeEndCodeUnits,
+        lessThan('first para\n\nsecond\r'.length),
+      );
+
+      // And a parser that DOES read the CR as a line ending ends its block
+      // there, so no block spans it and nothing stops. This is why the rule
+      // reads the blocks rather than the source: scanning the string would
+      // penalise a backend for something it gets right.
+      const String split = 'first\rsecond';
+      MarkdownRenderNode para(int start, int end) => MarkdownRenderNode(
+            type: 'paragraph',
+            depth: 0,
+            startCodeUnit: start,
+            endCodeUnit: end,
+            startRow: 0,
+            endRow: 0,
+            raw: split.substring(start, end),
+            content: split.substring(start, end),
+          );
+      expect(
+        analyzeWithheldMarkdownRegions(
+          split,
+          blocks: <MarkdownRenderNode>[para(0, 5), para(6, 12)],
+        ).safeEndCodeUnits,
+        split.length,
+      );
+
       // And with every withholding rule off there is nothing for the rule to
       // protect: the screen paints past the CR, so dropping the content would
       // only lose it. The rule exists because of withholding and goes away
