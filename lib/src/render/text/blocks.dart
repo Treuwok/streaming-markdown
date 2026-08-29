@@ -31,8 +31,15 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
               // differently — same as a paragraph's folded newline. Giving it
               // that position keeps the whole body traceable, where a
               // position-less space used to cost the item every range in it.
+              // The joining space IS the line break it replaced. When the
+              // previous body is empty it has no end to borrow, so the break
+              // itself — one before this line starts — is the position.
               body: last.body +
-                  _SourceSlice.whole(' ', last.body.sourceEnd) +
+                  _SourceSlice.whole(
+                      ' ',
+                      last.body.sourceEnd >= 0
+                          ? last.body.sourceEnd
+                          : (line.sourceStart > 0 ? line.sourceStart - 1 : 0)) +
                   line.trim(),
               stableKey: last.stableKey,
             ),
@@ -79,9 +86,6 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
 
     return _ParsedList(items: items);
   }
-
-  _CalloutData? _parseCallout(String text) =>
-      _parseCalloutSlices(_SourceSlice.whole(text, 0));
 
   /// The callout's title and body, each knowing where it came from.
   ///
@@ -161,14 +165,29 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
       _codeSlice(node.raw, 0, node.type).text;
 
 
-  String _codeLanguage(String raw) {
+  String _codeLanguage(String raw) =>
+      _codeLanguageSlice(_SourceSlice.whole(raw, 0))?.text ?? '';
+
+  /// The info-string token the header paints, as a span of the source.
+  ///
+  /// Returning the span rather than the text is the point: the header shows
+  /// exactly this token, and an info string can carry more after it. Finding
+  /// the token's text and then searching the block for it reported the whole
+  /// remainder of the opening line.
+  ///
+  /// The pattern's `\s*` crosses the line break, so a fence with NO info
+  /// string takes the first word of the BODY as its language — and the header
+  /// paints it. That quirk belongs to the renderer; this reports it faithfully
+  /// rather than diverging from the screen.
+  _SourceSlice? _codeLanguageSlice(_SourceSlice raw) {
     final RegExpMatch? match = RegExp(
       r'^\s*(```+|~~~+)\s*([A-Za-z0-9_+\-\.#]*)',
       multiLine: true,
-    ).firstMatch(raw);
-    if (match == null) {
-      return '';
+    ).firstMatch(raw.text);
+    final String? token = match?.group(2);
+    if (token == null || token.trim().isEmpty) {
+      return null;
     }
-    return match.group(2)!.trim();
+    return raw.sub(match!.end - token.length, match.end).trim();
   }
 }

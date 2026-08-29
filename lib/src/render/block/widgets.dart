@@ -3,23 +3,12 @@ part of '../view.dart';
 extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
   Widget _buildListBlock(
     BuildContext context,
-    MarkdownRenderNode node, {
+    _ListPlan plan, {
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
   }) {
-    final _ParsedList parsed = _parseListNode(node);
-    if (parsed.items.isEmpty) {
-      return _buildParagraphBlock(
-        context,
-        _contentOrRawSlice(node),
-        linkReferences: linkReferences,
-        footnoteNumbers: footnoteNumbers,
-      );
-    }
-
-    final TextStyle baseStyle = markdownTheme.paragraphTextStyle ??
-        Theme.of(context).textTheme.bodyLarge ??
-        const TextStyle(fontSize: 16);
+    final _ParsedList parsed = plan.list;
+    final TextStyle baseStyle = _paragraphStyle(context);
     final _RevealScheduleScope? scheduleScope = _RevealScheduleScope.maybeOf(
       context,
     );
@@ -94,17 +83,11 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
 
   Widget _buildQuoteBlock(
     BuildContext context,
-    MarkdownRenderNode node, {
+    _QuotePlan plan, {
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
   }) {
-    final _SourceSlice quote = _quoteSlice(node.raw, 0);
-    final String text = quote.text;
-    if (text.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final _CalloutData? callout = _parseCallout(text);
+    final _CalloutData? callout = plan.callout;
     final Color calloutColor = _calloutColor(callout?.kind);
 
     return Container(
@@ -135,7 +118,7 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
           ],
           _buildInlineMarkdown(
             context,
-            callout == null ? quote : callout.bodySlice,
+            plan.body,
             baseStyle: markdownTheme.paragraphTextStyle ??
                 Theme.of(context).textTheme.bodyLarge,
             linkReferences: linkReferences,
@@ -146,16 +129,10 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
     );
   }
 
-  Widget _buildCodeBlock(BuildContext context, MarkdownRenderNode node) {
-    final String code = _codeText(node);
-    if (code.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final bool indentedCode = node.type == 'indented_code_block';
-    final String language = indentedCode ? 'code' : _codeLanguage(node.raw);
-    final bool showHeader =
-        indentedCode || language.isNotEmpty || showCodeBlockCopyButton;
+  Widget _buildCodeBlock(BuildContext context, _CodePlan plan) {
+    final String code = plan.body.text;
+    final String language = plan.language?.text ?? '';
+    final bool showHeader = plan.showHeader;
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(

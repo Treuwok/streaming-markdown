@@ -3,18 +3,10 @@ part of '../view.dart';
 extension _StreamingMarkdownMetadataRenderer on StreamingMarkdownRenderView {
   Widget _buildMetadataBlock(
     BuildContext context,
-    MarkdownRenderNode node, {
+    _SourceSlice slice, {
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
   }) {
-    final _SourceSlice fromRaw = _normalizedSlice(node.raw, 0).trim();
-    final _SourceSlice slice =
-        fromRaw.text.isNotEmpty ? fromRaw : _contentOrRawSlice(node);
-    final String text = slice.text;
-    if (text.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(10),
@@ -42,21 +34,11 @@ extension _StreamingMarkdownMetadataRenderer on StreamingMarkdownRenderView {
 
   Widget _buildFootnoteDefinitionBlock(
     BuildContext context,
-    MarkdownRenderNode node, {
+    _DefinitionPlan plan, {
     required Map<String, String> linkReferences,
     required Map<String, int> footnoteNumbers,
   }) {
-    final List<_FootnoteDefinition> definitions =
-        _parseFootnoteDefinitions(node.raw);
-    if (definitions.isEmpty) {
-      return _buildMetadataBlock(
-        context,
-        node,
-        linkReferences: linkReferences,
-        footnoteNumbers: footnoteNumbers,
-      );
-    }
-
+    final List<_FootnoteDefinition> definitions = plan.definitions;
     final TextStyle bodyStyle =
         Theme.of(context).textTheme.bodyMedium ?? const TextStyle(fontSize: 14);
     int tokenStartIndex = 0;

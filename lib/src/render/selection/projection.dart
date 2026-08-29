@@ -172,7 +172,7 @@ extension _StreamingMarkdownSelectionProjectionBuilder
     required Map<String, int> footnoteNumbers,
   }) {
     final _ParsedTable? table = _parseMarkdownTable(
-      raw,
+      _SourceSlice.whole(raw, 0),
       allowLooseWithoutDelimiter: true,
       minLooseRowsWithoutDelimiter: 2,
     );

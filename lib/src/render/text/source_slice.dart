@@ -44,6 +44,10 @@ final class _SourceSlice {
   /// Source offset just past the last surviving character, or -1 when empty.
   int get sourceEnd => offsets.isEmpty ? -1 : offsets.last + 1;
 
+  /// Where this slice starts in the source, or -1 when it has no
+  /// position of its own (empty, or generated text).
+  int get sourceStart => offsets.isEmpty ? -1 : offsets.first;
+
   _SourceSlice _range(int start, int end) => _SourceSlice(
         text.substring(start, end),
         offsets.sublist(start, end),

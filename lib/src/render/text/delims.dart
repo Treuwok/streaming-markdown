@@ -18,6 +18,7 @@ extension _StreamingMarkdownDelimiterParsing on StreamingMarkdownRenderView {
     final RegExp definitionLine = RegExp(r'^\s{0,3}\[\^([^\]]+)\]:\s*(.*)$');
     final List<_FootnoteDefinition> definitions = <_FootnoteDefinition>[];
     String? currentId;
+    int currentStart = 0;
     List<_SourceSlice> currentBody = <_SourceSlice>[];
 
     void flush() {
@@ -26,7 +27,11 @@ extension _StreamingMarkdownDelimiterParsing on StreamingMarkdownRenderView {
         return;
       }
       definitions.add(
-        _FootnoteDefinition(id: id, bodySlice: _joinSliceLines(currentBody).trim()),
+        _FootnoteDefinition(
+          id: id,
+          bodySlice: _joinSliceLines(currentBody).trim(),
+          sourceStart: currentStart,
+        ),
       );
     }
 
@@ -35,6 +40,7 @@ extension _StreamingMarkdownDelimiterParsing on StreamingMarkdownRenderView {
       if (definition != null) {
         flush();
         currentId = definition.group(1)!.trim();
+        currentStart = line.sourceStart >= 0 ? line.sourceStart : 0;
         final String bodyText = definition.group(2)!;
         currentBody = <_SourceSlice>[
           line.sub(line.text.length - bodyText.length, line.text.length).trim(),

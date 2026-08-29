@@ -69,7 +69,7 @@ class _MarkdownHtmlSelectionConverter {
         return '<h$level>${_convertInline(view._headingText(block))}</h$level>';
       case 'paragraph':
         final _ParsedTable? table = view._parseMarkdownTable(
-          raw,
+          _SourceSlice.whole(raw, 0),
           allowLooseWithoutDelimiter: true,
           minLooseRowsWithoutDelimiter: 2,
         );
@@ -98,7 +98,7 @@ class _MarkdownHtmlSelectionConverter {
       case 'pipe_table_header':
       case 'pipe_table_row':
         final _ParsedTable? table = view._parseMarkdownTable(
-          raw,
+          _SourceSlice.whole(raw, 0),
           allowLooseWithoutDelimiter: true,
           minLooseRowsWithoutDelimiter: 2,
         );

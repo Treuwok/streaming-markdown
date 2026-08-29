@@ -28,11 +28,33 @@ class _ParsedListItem {
   final String stableKey;
 }
 
+/// A table's cells with their origins.
+///
+/// The cells are slices, not strings: the split that produced a cell already
+/// knew where it came from, so nothing downstream has to search the block for
+/// a cell's text to learn where it was. [headers] and [rows] are that same
+/// data flattened, which is all most consumers want.
 class _ParsedTable {
-  const _ParsedTable({required this.headers, required this.rows});
+  const _ParsedTable({required this.headerCells, required this.rowCells});
 
-  final List<String> headers;
-  final List<List<String>> rows;
+  final List<_SourceSlice> headerCells;
+  final List<List<_SourceSlice>> rowCells;
+
+  List<String> get headers =>
+      headerCells.map((_SourceSlice cell) => cell.text).toList(growable: false);
+
+  List<List<String>> get rows => rowCells
+      .map((List<_SourceSlice> row) =>
+          row.map((_SourceSlice cell) => cell.text).toList(growable: false))
+      .toList(growable: false);
+
+  /// Every cell in the order the table widget paints them.
+  Iterable<_SourceSlice> get cellsInRenderOrder sync* {
+    yield* headerCells;
+    for (final List<_SourceSlice> row in rowCells) {
+      yield* row;
+    }
+  }
 }
 
 class _CalloutData {
@@ -135,12 +157,22 @@ class _LatexMatch {
 }
 
 class _FootnoteDefinition {
-  const _FootnoteDefinition({required this.id, required this.bodySlice});
+  const _FootnoteDefinition({
+    required this.id,
+    required this.bodySlice,
+    required this.sourceStart,
+  });
 
   final String id;
 
   /// The body with its origins. [body] is this, flattened.
   final _SourceSlice bodySlice;
+
+  /// Where `[^id]:` starts. The label the renderer paints is generated text,
+  /// so it reports the construct it stands for rather than the body it sits
+  /// in front of — a cursor consuming the label must not already be inside
+  /// the body.
+  final int sourceStart;
 
   String get body => bodySlice.text;
 }
@@ -302,9 +334,16 @@ class _ProjectedPiece {
     this.slice, {
     this.literal = false,
     this.continuesLine = false,
+    this.emptyTokenFallback = true,
   });
 
   final _SourceSlice slice;
+
+  /// Whether the widget drawing this run falls back to the surviving source
+  /// when suppression leaves no tokens. `_buildInlineMarkdown` does — that is
+  /// why `**<b></b>**` still shows its asterisks. A footnote definition line
+  /// appends its tokens directly and so paints nothing at all in that case.
+  final bool emptyTokenFallback;
 
   /// Drawn by a plain widget rather than inline-parsed — a callout's title, a
   /// footnote definition's label. Its own delimiters are on the screen, so
@@ -335,4 +374,210 @@ class _BlockProjection {
 
   /// The renderer paints something here that this projection cannot describe.
   final bool approximate;
+}
+
+/// The one decision about a block: which shape it renders as, and — for the
+/// shapes that show text — exactly which slices that shape paints.
+///
+/// This exists because it used to be TWO decisions. A switch built the widget
+/// and a second switch beside it said what the widget would paint. They were
+/// written to agree, they carried the same case labels, and they still drifted
+/// on almost every block type: a fence's header showed `dart` but was reported
+/// as `dart linenums`; a loose table's rows ended at a plain line on screen but
+/// not in the report; an empty fence painted nothing and reported its language.
+/// Every one of those was found by a reviewer rather than by a test, because
+/// two copies that agree today are indistinguishable from two copies that
+/// agree forever.
+///
+/// Now the renderer is HANDED this. It cannot paint text that is not in
+/// [projection], because it has nowhere else to get the text from.
+sealed class _BlockPlan {
+  const _BlockPlan();
+
+  /// What this block puts on the screen, with origins.
+  _BlockProjection get projection => const _BlockProjection(<_ProjectedPiece>[]);
+}
+
+/// Paints nothing at all: a delimiter row, an empty block, suppressed raw data.
+class _NothingPlan extends _BlockPlan {
+  const _NothingPlan();
+}
+
+/// A horizontal rule. No text.
+class _ThematicBreakPlan extends _BlockPlan {
+  const _ThematicBreakPlan();
+}
+
+class _HeadingPlan extends _BlockPlan {
+  const _HeadingPlan(this.text, this.level);
+
+  final _SourceSlice text;
+  final int level;
+
+  @override
+  _BlockProjection get projection =>
+      _BlockProjection(<_ProjectedPiece>[_ProjectedPiece(text)]);
+}
+
+class _ParagraphPlan extends _BlockPlan {
+  const _ParagraphPlan(this.text);
+
+  /// Already folded: the renderer replaces a paragraph's line breaks with
+  /// spaces before it paints, so this is the string that reaches the screen.
+  final _SourceSlice text;
+
+  @override
+  _BlockProjection get projection =>
+      _BlockProjection(<_ProjectedPiece>[_ProjectedPiece(text)]);
+}
+
+/// A paragraph that is one display formula. The screen shows a rendered
+/// formula, not its markup, and this projection does not describe glyphs.
+class _DisplayLatexPlan extends _BlockPlan {
+  const _DisplayLatexPlan(this.latex);
+
+  final _LatexMatch latex;
+
+  @override
+  _BlockProjection get projection =>
+      const _BlockProjection(<_ProjectedPiece>[], approximate: true);
+}
+
+/// A paragraph that is one image. Nothing textual is painted.
+class _ImagePlan extends _BlockPlan {
+  const _ImagePlan(this.image);
+
+  final _InlineImageMatch image;
+}
+
+class _ListPlan extends _BlockPlan {
+  const _ListPlan(this.list);
+
+  final _ParsedList list;
+
+  @override
+  _BlockProjection get projection => _BlockProjection(list.items
+      .map((_ParsedListItem item) => _ProjectedPiece(item.body))
+      .toList(growable: false));
+}
+
+class _QuotePlan extends _BlockPlan {
+  const _QuotePlan(this.body, this.callout);
+
+  /// The quote's text when it is not a callout; the callout's body when it is.
+  final _SourceSlice body;
+  final _CalloutData? callout;
+
+  @override
+  _BlockProjection get projection {
+    final _CalloutData? data = callout;
+    if (data == null) {
+      return _BlockProjection(<_ProjectedPiece>[_ProjectedPiece(body)]);
+    }
+    return _BlockProjection(<_ProjectedPiece>[
+      // A plain `Text`, so a custom title like `**Danger**` shows its asterisks.
+      _ProjectedPiece(data.titleSlice, literal: true),
+      _ProjectedPiece(body),
+    ]);
+  }
+}
+
+class _CodePlan extends _BlockPlan {
+  const _CodePlan({
+    required this.body,
+    required this.language,
+    required this.showCopyButton,
+  });
+
+  final _SourceSlice body;
+
+  /// The header token, or null when the header shows no text. For a fence it
+  /// is the span the language was read from — an info string can carry more
+  /// (` ```dart linenums `) and only the language reaches the screen.
+  final _SourceSlice? language;
+
+  final bool showCopyButton;
+
+  bool get showHeader => language != null || showCopyButton;
+
+  @override
+  _BlockProjection get projection => _BlockProjection(
+        <_ProjectedPiece>[
+          if (language != null) _ProjectedPiece(language!, literal: true),
+          _ProjectedPiece(body),
+        ],
+        verbatim: true,
+      );
+}
+
+class _TablePlan extends _BlockPlan {
+  const _TablePlan(this.table, this.source, {required this.hasRenderableCell});
+
+  final _ParsedTable table;
+  final _SourceSlice source;
+
+  /// A table with nothing paintable in it still renders an empty frame, which
+  /// holds the layout steady while the rest of it streams in. The frame is on
+  /// the screen; no text is.
+  final bool hasRenderableCell;
+
+  @override
+  _BlockProjection get projection => _BlockProjection(hasRenderableCell
+      ? table.cellsInRenderOrder
+          .where((_SourceSlice cell) => cell.text.isNotEmpty)
+          .map(_ProjectedPiece.new)
+          .toList(growable: false)
+      : const <_ProjectedPiece>[]);
+}
+
+/// Front matter and any definition-shaped block with no definitions in it.
+/// Its line breaks survive to the screen — no paragraph folding.
+class _MetadataPlan extends _BlockPlan {
+  const _MetadataPlan(this.text);
+
+  final _SourceSlice text;
+
+  @override
+  _BlockProjection get projection =>
+      _BlockProjection(<_ProjectedPiece>[_ProjectedPiece(text)]);
+}
+
+class _DefinitionPlan extends _BlockPlan {
+  const _DefinitionPlan(this.definitions);
+
+  final List<_FootnoteDefinition> definitions;
+
+  @override
+  _BlockProjection get projection {
+    final List<_ProjectedPiece> pieces = <_ProjectedPiece>[];
+    for (final _FootnoteDefinition definition in definitions) {
+      pieces.add(_ProjectedPiece(
+        // Generated: the painted label is `id: `, which is not a span of the
+        // source. It reports the construct's start, so consuming it does not
+        // put a cursor inside a body that has not been shown yet.
+        _SourceSlice.generated('${definition.id}: ', definition.sourceStart),
+        literal: true,
+      ));
+      pieces.add(_ProjectedPiece(
+        definition.bodySlice,
+        continuesLine: true,
+        // This line appends its tokens directly instead of going through
+        // `_buildInlineMarkdown`, so it has no surviving-source fallback.
+        emptyTokenFallback: false,
+      ));
+    }
+    return _BlockProjection(pieces);
+  }
+}
+
+/// Raw HTML rendered as a card. It parses the HTML and paints its DOM text;
+/// describing that would be a third derivation of "what does this show".
+class _HtmlCardPlan extends _BlockPlan {
+  const _HtmlCardPlan(this.html);
+
+  final String html;
+
+  @override
+  _BlockProjection get projection =>
+      const _BlockProjection(<_ProjectedPiece>[], approximate: true);
 }

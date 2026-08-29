@@ -248,7 +248,9 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     // kept their `>` and paragraphs kept hard line breaks the screen folds
     // into spaces: the analysis was answering about a different string.
     final _BlockProjection projection =
-        projections._projectBlock(_renderNodeFor(blockRaw, _blockTypeOf(block)));
+        projections
+            ._planBlock(_renderNodeFor(blockRaw, block.type))
+            .projection;
     for (final _ProjectedPiece projected in projection.pieces) {
       final _SourceSlice inline = _rebase(projected.slice, block.start);
       void beginPiece() {
@@ -289,7 +291,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       // block — every character of it suppressed, so no tokens — reporting no
       // hidden ranges at all.
       final bool emptyTokens = result.tokens.isEmpty;
-      if (emptyTokens) {
+      if (emptyTokens && projected.emptyTokenFallback) {
         final _SourceSlice survivors =
             _survivingSlice(inline, result.hiddenRanges, result.withheldFrom);
         if (survivors.text.isNotEmpty) {
@@ -542,17 +544,5 @@ bool _monotonic(List<int> offsets, int start, int end) {
   return true;
 }
 
-String _blockTypeOf(MarkdownBlockNode block) {
-  if (block is CodeFenceNode) {
-    return 'fenced_code_block';
-  }
-  if (block is HeadingNode) {
-    return block.type;
-  }
-  if (block is ListNode) {
-    return 'list';
-  }
-  return block is GenericBlockNode ? block.type : '';
-}
 
 

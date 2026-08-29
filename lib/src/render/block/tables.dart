@@ -2,47 +2,6 @@ part of '../view.dart';
 
 extension _StreamingMarkdownTableAndMetadataRenderer
     on StreamingMarkdownRenderView {
-  Widget _buildTableBlock(
-    BuildContext context,
-    MarkdownRenderNode node, {
-    required Map<String, String> linkReferences,
-    required Map<String, int> footnoteNumbers,
-  }) {
-    final _ParsedTable? parsed = _parseMarkdownTable(
-      _normalizedRaw(node.raw),
-      allowLooseWithoutDelimiter: true,
-      minLooseRowsWithoutDelimiter: 2,
-    );
-    if (parsed != null) {
-      _rememberTableSnapshot(node, parsed);
-      return _buildTableWidget(
-        context,
-        parsed,
-        source: _normalizedSlice(node.raw, 0),
-        linkReferences: linkReferences,
-        footnoteNumbers: footnoteNumbers,
-      );
-    }
-
-    final _ParsedTable? snapshot = _readTableSnapshot(node);
-    if (snapshot != null) {
-      return _buildTableWidget(
-        context,
-        snapshot,
-        source: _normalizedSlice(node.raw, 0),
-        linkReferences: linkReferences,
-        footnoteNumbers: footnoteNumbers,
-      );
-    }
-
-    return _buildParagraphBlock(
-      context,
-      _contentOrRawSlice(node),
-      linkReferences: linkReferences,
-      footnoteNumbers: footnoteNumbers,
-    );
-  }
-
   Widget _buildTableWidget(
     BuildContext context,
     _ParsedTable table, {
