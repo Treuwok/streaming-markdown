@@ -188,6 +188,25 @@ void main() {
     }
   });
 
+  test('a hidden range that straddles the boundary is cut at it', () {
+    // Not in the fixtures above on purpose: the analysis stops at the lone CR
+    // and the renderer paints straight past it, so comparing them is
+    // meaningless here. What is being checked is the report's own promise —
+    // every range lies inside the prefix it declares safe. Without the cut
+    // this range ends at 16, and a caller applying it to a 12-character
+    // prefix cuts off the end of a string that is not there.
+    const String source = 'x <a href="y\rz">t</a>';
+    final WithheldMarkdownRegions report =
+        analyzeWithheldMarkdownRegions(source, suppressRawHtml: true);
+
+    expect(report.safeEndCodeUnits, source.indexOf('\r'));
+    expect(report.hiddenCodeUnitRanges, isNotEmpty);
+    for (final (int start, int end) in report.hiddenCodeUnitRanges) {
+      expect(start, lessThan(report.safeEndCodeUnits));
+      expect(end, lessThanOrEqualTo(report.safeEndCodeUnits));
+    }
+  });
+
   testWidgets('every reported character still points at itself', (
     tester,
   ) async {
@@ -205,6 +224,18 @@ void main() {
       for (final int offset in report.visibleSourceOffsets) {
         expect(offset, inInclusiveRange(0, source.length - 1), reason: source);
       }
+      // Ascending, non-overlapping, inside the boundary — which is what the
+      // field's own doc promises and nothing checked. A consumer cuts text at
+      // these coordinates, so a pair out of order or overlapping corrupts the
+      // result the same way a range past the boundary leaks it.
+      int previousEnd = 0;
+      for (final (int start, int end) in report.hiddenCodeUnitRanges) {
+        expect(start, greaterThanOrEqualTo(previousEnd), reason: source);
+        expect(end, greaterThanOrEqualTo(start), reason: source);
+        expect(end, lessThanOrEqualTo(report.safeEndCodeUnits), reason: source);
+        previousEnd = end;
+      }
+
       // Never past the safety boundary. The report answers "how far is it safe
       // to draw" in one field and "here is the text" in another; a caller that
       // trusts the second has no way to learn the first was smaller. A lone CR
