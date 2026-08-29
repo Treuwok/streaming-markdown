@@ -188,6 +188,32 @@ void main() {
     }
   });
 
+  group('a raw-text element reports nothing, all four of them', () {
+    // `script`, `style` and `pre` were suppressed; `textarea` was not, and
+    // reported its contents as visible text while the renderer paints none of
+    // it. The cause was two hand-written lists of the same four names — the
+    // block parser's start pattern had three, the raw-text test had four — so
+    // a `<textarea>` never became an html_block and the guard never saw it.
+    //
+    // Of the four that is the one whose content is by definition somebody's
+    // typing, which is how a missing word in a regex becomes a disclosure.
+    for (final (String name, String source) in const <(String, String)>[
+      ('textarea', '<textarea>private payload</textarea>'),
+      ('script', '<script>secretVar = 1</script>'),
+      ('style', '<style>.a{color:red}</style>'),
+      ('pre', '<pre>preformatted</pre>'),
+    ]) {
+      test(name, () {
+        expect(
+          analyzeWithheldMarkdownRegions(source,
+                  suppressRawHtml: true, sourceComplete: true)
+              .visibleText,
+          isEmpty,
+        );
+      });
+    }
+  });
+
   test('a list continuation is one line, not two', () {
     // Whitespace-sensitive on purpose. The sweep above compares WHICH
     // characters reach the screen and collapses whitespace to get there, so it

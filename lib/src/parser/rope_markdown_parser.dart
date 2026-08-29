@@ -3,6 +3,22 @@ import '../model/rope.dart';
 
 part 'rope_markdown_models.dart';
 
+/// The CommonMark raw-text elements: everything between the tags is data, not
+/// markup.
+///
+/// One list, because there were two. This parser's block-start pattern listed
+/// `pre`, `script` and `style` while the render side's raw-text test listed
+/// those AND `textarea` — so a `<textarea>` never became an html_block here,
+/// the raw-text guard over there never saw it, and its contents were reported
+/// as visible text while the renderer paints none of it. Of the four, that is
+/// the one whose content is by definition somebody's typing.
+const List<String> rawTextHtmlElements = <String>[
+  'script',
+  'style',
+  'pre',
+  'textarea',
+];
+
 /// Small pure-Dart block parser for [RopeString] sources.
 ///
 /// This parser is intentionally lightweight. It is useful for environments
@@ -547,8 +563,13 @@ class RopeMarkdownParser {
 
   bool _isHtmlBlockStart(String text) {
     final String trimmed = text.trimLeft();
+    // The raw-text names come from [rawTextHtmlElements] rather than being
+    // spelled again here; the rest are ordinary block-level containers.
+    final String rawText = rawTextHtmlElements.join('|');
     return RegExp(
-      r'^</?(?:article|aside|blockquote|details|div|dl|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|main|nav|ol|p|pre|section|table|ul|script|style|!--)\b',
+      '^</?(?:article|aside|blockquote|details|div|dl|fieldset|figcaption'
+      '|figure|footer|form|h[1-6]|header|hr|main|nav|ol|p|section|table|ul'
+      '|' + rawText + '|!--)' + r'\b',
       caseSensitive: false,
     ).hasMatch(trimmed);
   }

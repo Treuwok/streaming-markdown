@@ -483,7 +483,7 @@ bool _isRawTextHtmlOpening(String raw) {
   if (opening.startsWith('<!--')) {
     return true;
   }
-  for (final String name in const <String>['script', 'style', 'pre', 'textarea']) {
+  for (final String name in rawTextHtmlElements) {
     // `<pre>` and `<pre class=…>` are the element; `<prefix>` is not.
     final int after = 1 + name.length;
     if (!opening.startsWith('<$name')) {
