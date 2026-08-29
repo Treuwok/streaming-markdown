@@ -359,11 +359,7 @@ class _ProjectedPiece {
 
 /// The text a block paints, in the pieces the renderer paints them as.
 class _BlockProjection {
-  const _BlockProjection(
-    this.pieces, {
-    this.verbatim = false,
-    this.approximate = false,
-  });
+  const _BlockProjection(this.pieces, {this.verbatim = false});
 
   /// One per separately-rendered run: a list item, a table cell, a definition.
   final List<_ProjectedPiece> pieces;
@@ -371,9 +367,6 @@ class _BlockProjection {
   /// Whether [pieces] are shown as-is rather than inline-parsed. Code blocks
   /// are, and their edge whitespace is content rather than block syntax.
   final bool verbatim;
-
-  /// The renderer paints something here that this projection cannot describe.
-  final bool approximate;
 }
 
 /// The one decision about a block: which shape it renders as, and — for the
@@ -431,16 +424,26 @@ class _ParagraphPlan extends _BlockPlan {
       _BlockProjection(<_ProjectedPiece>[_ProjectedPiece(text)]);
 }
 
-/// A paragraph that is one display formula. The screen shows a rendered
-/// formula, not its markup, and this projection does not describe glyphs.
+/// A paragraph that is one display formula.
+///
+/// The screen shows rendered glyphs, so there is no span of the source to map
+/// character by character — the expression stands in for them, anchored at the
+/// construct that produced it. That is the same answer an INLINE formula
+/// already gives (`_paintedTextOf` returns its expression); a standalone one
+/// disagreeing with it would be a difference with no reason behind it.
 class _DisplayLatexPlan extends _BlockPlan {
-  const _DisplayLatexPlan(this.latex);
+  const _DisplayLatexPlan(this.latex, this.sourceStart);
 
   final _LatexMatch latex;
+  final int sourceStart;
 
   @override
-  _BlockProjection get projection =>
-      const _BlockProjection(<_ProjectedPiece>[], approximate: true);
+  _BlockProjection get projection => _BlockProjection(<_ProjectedPiece>[
+        _ProjectedPiece(
+          _SourceSlice.generated(latex.expression, sourceStart),
+          literal: true,
+        ),
+      ]);
 }
 
 /// A paragraph that is one image. Nothing textual is painted.
@@ -570,14 +573,23 @@ class _DefinitionPlan extends _BlockPlan {
   }
 }
 
-/// Raw HTML rendered as a card. It parses the HTML and paints its DOM text;
-/// describing that would be a third derivation of "what does this show".
+/// Raw HTML rendered as a card, which happens only with `suppressRawHtml`
+/// off.
+///
+/// ⚠️ KNOWN GAP, and it is silent: the card parses the HTML and paints its DOM
+/// text, and this reports none of it. Describing that text means deriving
+/// "what does this HTML show" a third time, next to the card's own renderer —
+/// the shape this whole file exists to stop — so it is not attempted here.
+///
+/// There used to be an `approximate` flag set at this spot. Nothing ever read
+/// it: it reached no consumer and was absent from the public report, so it
+/// documented a warning that was never delivered. A flag nobody reads is a
+/// claim, not a safeguard, and it made this gap look handled. Removed.
+///
+/// Every caller in this repo passes `suppressRawHtml: true`, so nothing hits
+/// this today.
 class _HtmlCardPlan extends _BlockPlan {
   const _HtmlCardPlan(this.html);
 
   final String html;
-
-  @override
-  _BlockProjection get projection =>
-      const _BlockProjection(<_ProjectedPiece>[], approximate: true);
 }

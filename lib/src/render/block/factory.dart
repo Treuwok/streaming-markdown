@@ -119,7 +119,7 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
     final _SourceSlice folded = text.newlinesAsSpaces();
     final _LatexMatch? latex = _matchSingleDisplayLatex(folded.text);
     if (latex != null) {
-      return _DisplayLatexPlan(latex);
+      return _DisplayLatexPlan(latex, folded.sourceStart < 0 ? 0 : folded.sourceStart);
     }
     final _InlineImageMatch? image = _matchSingleInlineImage(folded.text);
     if (image != null) {

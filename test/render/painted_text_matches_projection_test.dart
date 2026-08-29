@@ -15,6 +15,11 @@
 /// a reader who is not the renderer. Reintroducing the old table bug — a
 /// projection that scans for its own cells — does turn this red.
 ///
+/// Not covered, and deliberately: `suppressRawHtml: false`. That renders raw
+/// HTML as a card which paints its own DOM text, and the report omits it — a
+/// known, silent gap documented on `_HtmlCardPlan`. Every caller in this repo
+/// passes `true`, which is what these fixtures use.
+///
 /// It exists because they disagreed on almost every block type. The analysis
 /// used to run its own switch over block types, written to mirror the
 /// renderer's and sitting right beside it. Reviewers found the drift one case
@@ -122,6 +127,10 @@ void main() {
     // ---- suppression leaves surviving syntax ----
     ('an inline tag suppressed to nothing', '**<b></b>**'),
     ('prose wrapped in a block tag', '<div>\nImportant answer\n</div>'),
+
+    // ---- a standalone formula stands in for its rendered glyphs ----
+    (r'a display formula on its own', r'$$x + 1$$'),
+    (r'a formula inside a sentence', r'see $x + 1$ there'),
 
     // ---- ordinary prose, as the control ----
     ('headings and paragraphs', '# Title\n\nsome **bold** prose'),
