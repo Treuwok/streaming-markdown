@@ -175,13 +175,22 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
   /// the token's text and then searching the block for it reported the whole
   /// remainder of the opening line.
   ///
-  /// The pattern's `\s*` crosses the line break, so a fence with NO info
-  /// string takes the first word of the BODY as its language — and the header
-  /// paints it. That quirk belongs to the renderer; this reports it faithfully
-  /// rather than diverging from the screen.
+  /// The gap after the fence marker is `[ \t]*`, NOT `\s*`.
+  ///
+  /// `\s` matches a newline, so the old pattern ran past the end of the
+  /// opening line and took the first word of the BODY as the language — and
+  /// the header painted it. A fence with no info string labelled itself `let`
+  /// for a block starting `let x = 1`.
+  ///
+  /// It was left alone once, as a renderer quirk to report faithfully rather
+  /// than diverge from. That stopped being tenable when the same characters
+  /// were painted twice — once as the header, once as the body — because the
+  /// source ledger then has to go backwards, and a reveal cursor reading it
+  /// re-hides text it has already shown. An info string lives on the opening
+  /// line; the pattern now says so.
   _SourceSlice? _codeLanguageSlice(_SourceSlice raw) {
     final RegExpMatch? match = RegExp(
-      r'^\s*(```+|~~~+)\s*([A-Za-z0-9_+\-\.#]*)',
+      r'^[ \t]*(```+|~~~+)[ \t]*([A-Za-z0-9_+\-\.#]*)',
       multiLine: true,
     ).firstMatch(raw.text);
     final String? token = match?.group(2);

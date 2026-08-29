@@ -172,6 +172,19 @@ void main() {
       for (final int offset in report.visibleSourceOffsets) {
         expect(offset, inInclusiveRange(0, source.length - 1), reason: source);
       }
+      // Never backwards. A reveal cursor walks this ledger forward and cannot
+      // survive a step back — it would re-hide text it had already shown. The
+      // way it happens is not obvious: a generated run (a header, a label)
+      // reports ONE position for all of its characters, so a block separator
+      // computed as "one past the last" can land beyond the real start of the
+      // piece that follows.
+      for (int i = 1; i < report.visibleSourceOffsets.length; i++) {
+        expect(
+          report.visibleSourceOffsets[i],
+          greaterThanOrEqualTo(report.visibleSourceOffsets[i - 1]),
+          reason: 'offset $i went backwards in $source',
+        );
+      }
     }
   });
 }

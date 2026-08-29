@@ -200,17 +200,29 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   // newline and the block after it another, which shifted every later offset.
   bool separatorPending = false;
 
-  void flushSeparator() {
+  /// [nextOffset] is where the character about to be appended came from.
+  ///
+  /// The separator wants to sit just after the block it follows rather than at
+  /// the start of the next one, so that a cursor reading it does not jump the
+  /// blank source between them before accounting for the separator itself.
+  /// But "just after" was computed as `last + 1` and nothing checked it
+  /// against where the next character actually is — and the caller knows,
+  /// because it is appending that character. When the preceding piece is
+  /// generated text (a header, a label: one position repeated for its whole
+  /// run) and the next piece begins at that same position, `last + 1` steps
+  /// PAST it and the ledger goes backwards, which is the one thing a reveal
+  /// cursor cannot survive.
+  ///
+  /// So it is told, instead of guessing.
+  void flushSeparator(int nextOffset) {
     if (!separatorPending) {
       return;
     }
     separatorPending = false;
     if (visibleUnits.isNotEmpty) {
       visibleUnits.add(10);
-      // The end of the block it follows, not the start of the next one: a
-      // cursor reading this must not jump across the blank source between
-      // them before it has accounted for the separator itself.
-      visibleOffsets.add(visibleOffsets.last + 1);
+      final int after = visibleOffsets.last + 1;
+      visibleOffsets.add(after < nextOffset ? after : nextOffset);
     }
     blockStart = visibleUnits.length;
   }
@@ -228,7 +240,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   }
 
   void addUnit(int unit, int sourceOffset) {
-    flushSeparator();
+    flushSeparator(sourceOffset);
     visibleUnits.add(unit);
     visibleOffsets.add(sourceOffset);
   }

@@ -29,7 +29,10 @@ void main() {
       '<div>\nImportant answer\n</div>': ' Important answer ',
       'see `code` here': 'see code here',
       'para one\n\npara two': 'para one\npara two',
-      '```\nlet x = 1\n```': 'let\nlet x = 1',
+      // No info string, so no header. This used to expect `let\nlet x = 1`:
+      // the language pattern ran past the opening line and labelled the
+      // block with the first word of its own body.
+      '```\nlet x = 1\n```': 'let x = 1',
     };
 
     cases.forEach((String source, String expected) {
@@ -132,7 +135,7 @@ void main() {
       // NOTE: a fence with no info string takes the body's first word as its
       // language and paints it as the header — a renderer quirk this report
       // faithfully reproduces rather than papers over.
-      '```\ncode   \n```': 'code\ncode',
+      '```\ncode   \n```': 'code',
     };
     cases.forEach((String source, String expected) {
       test(source.split('\n').join('|'),
@@ -229,7 +232,7 @@ void main() {
 
     test('a code body keeps its leading blank line', () {
       // Verbatim: the blank first line is content, not the gap between blocks.
-      expect(_scan('```\n\ncode\n```').visibleText, 'code\n\ncode');
+      expect(_scan('```\n\ncode\n```').visibleText, '\ncode');
     });
 
     test('an unfinished destination in a later item keeps the earlier one', () {
