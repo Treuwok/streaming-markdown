@@ -24,7 +24,9 @@ void main() {
       '**bold** and _em_': 'bold and em',
       '[label](https://example.test)': 'label',
       'a <b>tag</b> c': 'a tag c',
-      '<div>\nImportant answer\n</div>': 'Important answer',
+      // The line breaks either side of the suppressed tags are painted as
+      // spaces, exactly as the renderer paints them.
+      '<div>\nImportant answer\n</div>': ' Important answer ',
       'see `code` here': 'see code here',
       'para one\n\npara two': 'para one\npara two',
       '```\nlet x = 1\n```': 'let x = 1',
@@ -68,6 +70,12 @@ void main() {
           final int at = r.visibleSourceOffsets[i];
           expect(at, inInclusiveRange(0, source.length - 1),
               reason: 'offset $at for visible[$i] is outside the source');
+          if (painted == ' ' && source[at] == '\n') {
+            // The one documented substitution: a paragraph's line break is
+            // painted as a space, and it still points at the break it came
+            // from. Everything else must be the character itself.
+            continue;
+          }
           expect(source[at], painted,
               reason: 'visible[$i] = "$painted" claims to come from '
                   'source[$at] = "${source[at]}"');
@@ -108,5 +116,31 @@ void main() {
     ]) {
       test(source, () => expect(_scan(source).visibleText, isEmpty));
     }
+  });
+
+  group('block syntax is not visible text (codex R1)', () {
+    // Each of these was reported with its own syntax in it, because the
+    // analysis scanned the raw block slice while the renderer scans the text
+    // it extracts from that slice. They now run through the same extraction.
+    const Map<String, String> cases = <String, String>{
+      '# Heading': 'Heading',
+      '### Deeper': 'Deeper',
+      '> quoted text': 'quoted text',
+      '> line one\n> line two': 'line one\nline two',
+      'first line\nsecond line': 'first line second line',
+      '```dart\ndart\n```': 'dart',
+      '```\ncode   \n```': 'code',
+    };
+    cases.forEach((String source, String expected) {
+      test(source.split('\n').join('|'),
+          () => expect(_scan(source).visibleText, expected));
+    });
+  });
+
+  test('a block that paints nothing adds no separator', () {
+    // `first\n\n<div></div>\n\nlast` — the tag-only block contributes no
+    // characters, so it must not contribute a gap either. Two separators for
+    // one gap shifted every offset after it.
+    expect(_scan('first\n\n<div></div>\n\nlast').visibleText, 'first\nlast');
   });
 }

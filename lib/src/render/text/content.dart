@@ -48,15 +48,9 @@ extension _StreamingMarkdownContentParsing on StreamingMarkdownRenderView {
     return node.text.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
-  String _headingText(MarkdownRenderNode node) {
-    final String source = node.content.trim().isNotEmpty
-        ? node.content.trim()
-        : _normalizedRaw(node.raw).trim();
-    if (node.type == 'setext_heading') {
-      return _stripSetextDelimiter(source);
-    }
-    return source.replaceFirst(RegExp(r'^\s{0,3}#{1,6}\s*'), '').trim();
-  }
+  String _headingText(MarkdownRenderNode node) =>
+      _headingSlice(node.raw, 0, node.type).text;
+
 
   int _headingLevelForNode(MarkdownRenderNode node) {
     if (node.type == 'atx_heading') {
@@ -80,27 +74,15 @@ extension _StreamingMarkdownContentParsing on StreamingMarkdownRenderView {
     return 1;
   }
 
-  String _paragraphText(MarkdownRenderNode node) {
-    final String raw = _normalizedRaw(node.raw).trim();
-    if (raw.isNotEmpty) {
-      return raw;
-    }
-    return node.content.trim();
-  }
+  String _paragraphText(MarkdownRenderNode node) =>
+      _paragraphSlice(node.raw, 0, node.content).text;
+
 
   String _normalizedRaw(String raw) {
     return raw.replaceAll('\r', '').trimRight();
   }
 
-  String _stripSetextDelimiter(String text) {
-    final List<String> lines = _normalizedRaw(text).split('\n');
-    if (lines.length < 2 || !_isSetextDelimiterLine(lines.last)) {
-      return text.trim();
-    }
-    return lines.take(lines.length - 1).join('\n').trim();
-  }
 
-  bool _isSetextDelimiterLine(String line) {
-    return RegExp(r'^\s{0,3}(=+|-+)\s*$').hasMatch(line);
-  }
+
+
 }

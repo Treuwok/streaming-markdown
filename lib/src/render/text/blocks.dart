@@ -114,37 +114,13 @@ extension _StreamingMarkdownBlockTextParsing on StreamingMarkdownRenderView {
     }
   }
 
-  String _quoteText(MarkdownRenderNode node) {
-    return _normalizedRaw(node.raw)
-        .split('\n')
-        .map((String line) => line.replaceFirst(RegExp(r'^\s*>\s?'), ''))
-        .join('\n')
-        .trim();
-  }
+  String _quoteText(MarkdownRenderNode node) =>
+      _quoteSlice(node.raw, 0).text;
 
-  String _codeText(MarkdownRenderNode node) {
-    final String raw = _normalizedRaw(node.raw);
-    if (node.type == 'fenced_code_block') {
-      final List<String> lines = raw.split('\n');
-      if (lines.isNotEmpty &&
-          RegExp(r'^\s*(```+|~~~+)').hasMatch(lines.first)) {
-        lines.removeAt(0);
-      }
-      if (lines.isNotEmpty &&
-          RegExp(r'^\s*(```+|~~~+)\s*$').hasMatch(lines.last)) {
-        lines.removeLast();
-      }
-      return lines.join('\n').trimRight();
-    }
-    if (node.type == 'indented_code_block') {
-      return raw
-          .split('\n')
-          .map((String line) => line.replaceFirst(RegExp(r'^(?: {4}|\t)'), ''))
-          .join('\n')
-          .trimRight();
-    }
-    return raw;
-  }
+
+  String _codeText(MarkdownRenderNode node) =>
+      _codeSlice(node.raw, 0, node.type).text;
+
 
   String _codeLanguage(String raw) {
     final RegExpMatch? match = RegExp(

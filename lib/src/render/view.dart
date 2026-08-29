@@ -55,6 +55,7 @@ part 'text/inline.dart';
 part 'text/delims.dart';
 part 'text/content.dart';
 part 'text/models.dart';
+part 'text/source_slice.dart';
 part 'block/pipeline.dart';
 part 'block/cache.dart';
 part 'selection/projection.dart';

@@ -141,33 +141,60 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     }
   }
 
-  void separateBlocks(int atSourceOffset) {
-    endBlock();
+  // Deferred: a block that turns out to paint nothing must not leave a gap
+  // behind it. Emitting the separator up front gave a tag-only HTML block one
+  // newline and the block after it another, which shifted every later offset.
+  bool separatorPending = false;
+
+  void flushSeparator() {
+    if (!separatorPending) {
+      return;
+    }
+    separatorPending = false;
     if (visibleUnits.isNotEmpty) {
       visibleUnits.add(10);
-      visibleOffsets.add(atSourceOffset);
+      // The end of the block it follows, not the start of the next one: a
+      // cursor reading this must not jump across the blank source between
+      // them before it has accounted for the separator itself.
+      visibleOffsets.add(visibleOffsets.last + 1);
     }
     blockStart = visibleUnits.length;
   }
 
-  void addVerbatim(String text, int sourceStart) {
-    for (int k = 0; k < text.length; k++) {
-      visibleUnits.add(text.codeUnitAt(k));
-      visibleOffsets.add(sourceStart + k);
+  void separateBlocks() {
+    endBlock();
+    separatorPending = true;
+  }
+
+  void addUnit(int unit, int sourceOffset) {
+    flushSeparator();
+    visibleUnits.add(unit);
+    visibleOffsets.add(sourceOffset);
+  }
+
+  void addSlice(_SourceSlice slice) {
+    for (int k = 0; k < slice.text.length; k++) {
+      addUnit(slice.text.codeUnitAt(k), slice.offsets[k]);
     }
   }
 
   for (final MarkdownBlockNode block in document.blocks) {
+    final String blockRaw = source.substring(block.start, block.end);
+
     if (_blockHasNoInlineContent(block)) {
       // Not inline-parsed, but a code block is still text on the screen, and
-      // anything counting painted characters has to count those too. Its
-      // content is verbatim — that is what makes it a code block.
-      final String? code = _literalBlockText(block);
-      if (code != null && code.isNotEmpty) {
-        // The content appears once, after the opening fence line.
-        final int at = source.indexOf(code, block.start);
-        separateBlocks(block.start);
-        addVerbatim(code, at == -1 ? block.start : at);
+      // anything counting painted characters has to count those too. It comes
+      // from the renderer's own extraction — fences and indentation removed
+      // exactly as the renderer removes them, rather than found by searching
+      // the source for the content, which matches the info string first when
+      // a fence's first code line repeats it.
+      if (_isCodeBlock(block)) {
+        final _SourceSlice code =
+            _codeSlice(blockRaw, block.start, _blockTypeOf(block));
+        if (code.text.isNotEmpty) {
+          separateBlocks();
+          addSlice(code);
+        }
       }
       continue;
     }
@@ -190,30 +217,44 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       sourceComplete: sourceComplete,
       allowUnclosedDelimiters: allowUnclosedInlineDelimiters,
     );
-    final _InlineParseResult result =
-        parser.scan(source.substring(block.start, block.end));
-    separateBlocks(block.start);
+    // THE string the renderer inline-parses for this block — not the raw
+    // slice. Scanning the raw slice was why headings kept their `#`, quotes
+    // kept their `>` and paragraphs kept hard line breaks the screen folds
+    // into spaces: the analysis was answering about a different string.
+    final _SourceSlice inline = _inlineSliceForBlock(block, blockRaw);
+    if (inline.isEmpty) {
+      continue;
+    }
+
+    final _InlineParseResult result = parser.scan(inline.text);
+
+    // Offsets are into `inline.text`; the slice says where each of those
+    // characters lives in the document.
+    int sourceAt(int indexInSlice) => indexInSlice < inline.offsets.length
+        ? inline.offsets[indexInSlice]
+        : inline.sourceEnd;
+
+    separateBlocks();
     for (final _InlineToken token in result.tokens) {
       final String painted = token.isImage ? token.altText : token.text;
       if (painted.isEmpty) {
         continue;
       }
-      if (token.isVerbatimSlice) {
-        addVerbatim(painted, block.start + token.visibleSourceStart);
-      } else {
-        // No verbatim source to point at; the whole run reports the construct.
-        for (int k = 0; k < painted.length; k++) {
-          visibleUnits.add(painted.codeUnitAt(k));
-          visibleOffsets.add(block.start + token.visibleSourceStart);
-        }
+      // A token whose text is not a verbatim slice has no per-character
+      // origin, so all of it reports the construct that produced it.
+      final bool verbatim = token.isVerbatimSlice;
+      for (int k = 0; k < painted.length; k++) {
+        addUnit(painted.codeUnitAt(k),
+            sourceAt(token.visibleSourceStart + (verbatim ? k : 0)));
       }
     }
     for (final (int start, int end) range in result.hiddenRanges) {
-      hidden.add((block.start + range.$1, block.start + range.$2));
+      hidden.add((sourceAt(range.$1), sourceAt(range.$2 - 1) + 1));
     }
     final int? withheldFrom = result.withheldFrom;
     if (withheldFrom != null) {
-      final int boundary = block.start + withheldFrom;
+      final int boundary =
+          withheldFrom == 0 ? block.start : sourceAt(withheldFrom - 1) + 1;
       if (boundary < safeEnd) {
         safeEnd = boundary;
       }
@@ -289,16 +330,43 @@ bool _isRawTextHtmlOpening(String raw) {
   return false;
 }
 
-/// Painted text of a block that is not inline-parsed, or null if it paints
-/// none. Code is the only such block whose content reaches the screen.
-String? _literalBlockText(MarkdownBlockNode block) {
+String _blockTypeOf(MarkdownBlockNode block) {
   if (block is CodeFenceNode) {
-    return block.code;
+    return 'fenced_code_block';
   }
-  if (block is GenericBlockNode && block.type == 'indented_code_block') {
-    return block.content;
+  if (block is HeadingNode) {
+    return block.type;
   }
-  return null;
+  return block is GenericBlockNode ? block.type : '';
+}
+
+bool _isCodeBlock(MarkdownBlockNode block) =>
+    block is CodeFenceNode ||
+    (block is GenericBlockNode && block.type == 'indented_code_block');
+
+/// The string this block's inline content is parsed from, with origins.
+///
+/// One function, and the renderer's own extraction behind every branch — so
+/// "which part of this block is inline text" has one answer instead of one per
+/// consumer.
+_SourceSlice _inlineSliceForBlock(MarkdownBlockNode block, String blockRaw) {
+  final String type = _blockTypeOf(block);
+  switch (type) {
+    case 'atx_heading':
+    case 'setext_heading':
+      return _headingSlice(blockRaw, block.start, type);
+    case 'block_quote':
+      return _quoteSlice(blockRaw, block.start);
+    default:
+      // Paragraphs, list items, tables, callouts and HTML blocks all reach the
+      // inline scan through the paragraph path in the block factory, which
+      // folds newlines into spaces before painting.
+      return _paragraphSlice(
+        blockRaw,
+        block.start,
+        block is GenericBlockNode ? block.content : '',
+      ).newlinesAsSpaces();
+  }
 }
 
 /// Blocks whose text is never inline-parsed, so nothing in them can leak.
