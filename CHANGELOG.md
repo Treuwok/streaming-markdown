@@ -1,5 +1,16 @@
 ## Unreleased
 
+- **Breaking.** `MarkdownRenderNode.startByte` / `endByte` are now
+  `startCodeUnit` / `endCodeUnit`, and always hold UTF-16 code units — the unit
+  a Dart `String` is indexed in, so `source.substring(startCodeUnit,
+  endCodeUnit)` is the block. They previously held real UTF-8 bytes when the
+  native parser produced the block and code units when the pure-Dart one did;
+  the two are equal for ASCII, so the difference only appeared on non-Latin
+  content. `MarkdownRenderNode.fromDynamicMap` throws on a map still carrying
+  the old keys rather than reading bytes as code units.
+  `MarkdownSyntaxNode.startByte` is unchanged and really is bytes.
+- Add `Utf8CodeUnitIndex` for translating byte offsets into code-unit offsets.
+
 ## 0.3.6
 
 - Replace overlay-derived selection tracking with render-backed absolute range
