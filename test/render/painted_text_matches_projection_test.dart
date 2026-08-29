@@ -207,6 +207,37 @@ void main() {
     }
   });
 
+  group('a generated run cannot smuggle text past the boundary', () {
+    // Generated text reports ONE position for its whole run, so clipping the
+    // ledger by offset alone lets the part of the run derived from past the
+    // boundary through. The offsets here are all 0 and the boundary is 3, so
+    // the earlier offset-only check passes while the text is wrong — an
+    // assertion weaker than the property it was written for.
+    for (final (String name, String source) in <(String, String)>[
+      ('a formula spanning the CR', '\$\$x\ry\$\$'),
+      ('a definition id spanning the CR', '[^a\rb]: body'),
+    ]) {
+      test(name, () {
+        final WithheldMarkdownRegions report =
+            analyzeWithheldMarkdownRegions(source, suppressRawHtml: true);
+        expect(report.safeEndCodeUnits, source.indexOf('\r'));
+        expect(report.visibleText, isEmpty,
+            reason: 'the whole run is derived partly from past the boundary');
+      });
+    }
+
+    test('but a sibling run that ends before it survives', () {
+      // The bound is per RUN, not per block. A list is one block; the second
+      // item holding the unfinished destination must not take the first down
+      // with it, which a block-wide bound did.
+      final WithheldMarkdownRegions report = analyzeWithheldMarkdownRegions(
+        '- first\n- [link](https://unfinished',
+        suppressRawHtml: true,
+      );
+      expect(report.visibleText, 'first');
+    });
+  });
+
   testWidgets('every reported character still points at itself', (
     tester,
   ) async {
