@@ -356,7 +356,7 @@ Setext title
               _renderNode(
                 '```dart\nfinal answer = 42;\n```',
                 type: 'fenced_code_block',
-                startByte: 21,
+                startCodeUnit: 21,
                 startRow: 2,
               ),
             ],
@@ -445,7 +445,7 @@ Setext title
                 _renderNode(
                   'Autolinks render from angle brackets: '
                   '<https://github.com>.',
-                  startByte: 76,
+                  startCodeUnit: 76,
                   startRow: 2,
                 ),
               ],
@@ -978,22 +978,22 @@ Setext title
                 '# Front matter',
                 type: 'atx_heading',
                 content: 'Front matter',
-                startByte: 0,
+                startCodeUnit: 0,
               ),
               _renderNode(
                 'Front matter is rendered as a metadata block when it appears '
                 'at the top of the document.',
-                startByte: 16,
+                startCodeUnit: 16,
               ),
               _renderNode(
                 '---',
                 type: 'thematic_break',
                 content: '',
-                startByte: 106,
+                startCodeUnit: 106,
               ),
               _renderNode(
                 'Thematic breaks render as horizontal dividers.',
-                startByte: 111,
+                startCodeUnit: 111,
               ),
             ],
             padding: EdgeInsets.zero,
@@ -1052,8 +1052,8 @@ Setext title
     addTearDown(scrollController.dispose);
 
     List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-      _renderNode('Selected block one.', startByte: 0),
-      _renderNode('Selected block two.', startByte: 21, startRow: 2),
+      _renderNode('Selected block one.', startCodeUnit: 0),
+      _renderNode('Selected block two.', startCodeUnit: 21, startRow: 2),
     ];
     late StateSetter updateHost;
 
@@ -1092,18 +1092,18 @@ Setext title
 
     updateHost(() {
       nodes = <MarkdownRenderNode>[
-        _renderNode('Selected block one.', startByte: 0),
+        _renderNode('Selected block one.', startCodeUnit: 0),
       ];
     });
     await tester.pump();
 
     updateHost(() {
       nodes = <MarkdownRenderNode>[
-        _renderNode('Selected block one.', startByte: 0),
-        _renderNode('Selected block two.', startByte: 21, startRow: 2),
+        _renderNode('Selected block one.', startCodeUnit: 0),
+        _renderNode('Selected block two.', startCodeUnit: 21, startRow: 2),
         _renderNode(
           'Appended while the user is scrolling.',
-          startByte: 42,
+          startCodeUnit: 42,
           startRow: 4,
         ),
       ];
@@ -1150,10 +1150,10 @@ Setext title
 
     const String selectedBlock = 'Selected block one.';
     List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-      _renderNode(selectedBlock, startByte: 0),
+      _renderNode(selectedBlock, startCodeUnit: 0),
       _renderNode(
         'Streaming block two is still fading in.',
-        startByte: 21,
+        startCodeUnit: 21,
         startRow: 2,
       ),
     ];
@@ -1204,15 +1204,15 @@ Setext title
 
     updateHost(() {
       nodes = <MarkdownRenderNode>[
-        _renderNode(selectedBlock, startByte: 0),
+        _renderNode(selectedBlock, startCodeUnit: 0),
         _renderNode(
           'Streaming block two is still fading in.',
-          startByte: 21,
+          startCodeUnit: 21,
           startRow: 2,
         ),
         _renderNode(
           'A newly appended block lands while the mouse is still selecting.',
-          startByte: 61,
+          startCodeUnit: 61,
           startRow: 4,
         ),
       ];
@@ -1259,10 +1259,10 @@ Setext title
     const String firstBlock = 'Alpha block begins.';
     const String secondBlock = 'Second block ends.';
     final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-      _renderNode(firstBlock, startByte: 0),
+      _renderNode(firstBlock, startCodeUnit: 0),
       _renderNode(
         secondBlock,
-        startByte: firstBlock.length + 2,
+        startCodeUnit: firstBlock.length + 2,
         startRow: 2,
       ),
     ];
@@ -1332,10 +1332,10 @@ Setext title
               children: <Widget>[
                 StreamingMarkdownRenderView(
                   nodes: <MarkdownRenderNode>[
-                    _renderNode(firstBlock, startByte: 0),
+                    _renderNode(firstBlock, startCodeUnit: 0),
                     _renderNode(
                       secondBlock,
-                      startByte: firstBlock.length + 2,
+                      startCodeUnit: firstBlock.length + 2,
                       startRow: 2,
                     ),
                   ],
@@ -1413,11 +1413,11 @@ Setext title
 
     const String firstBlock = 'Anchor starts here.';
     final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-      _renderNode(firstBlock, startByte: 0),
+      _renderNode(firstBlock, startCodeUnit: 0),
       for (int i = 0; i < 18; i += 1)
         _renderNode(
           'Auto-scroll block $i keeps extending the selected range.',
-          startByte: firstBlock.length + 2 + i * 60,
+          startCodeUnit: firstBlock.length + 2 + i * 60,
           startRow: 2 + i * 2,
         ),
     ];
@@ -1508,17 +1508,17 @@ Setext title
             width: 420,
             child: StreamingMarkdownRenderView(
               nodes: <MarkdownRenderNode>[
-                _renderNode(intro, startByte: 0),
+                _renderNode(intro, startCodeUnit: 0),
                 _renderNode(
                   rawTable,
                   type: 'pipe_table',
-                  startByte: intro.length + 2,
+                  startCodeUnit: intro.length + 2,
                   startRow: 2,
                   endRow: 4,
                 ),
                 _renderNode(
                   after,
-                  startByte: intro.length + rawTable.length + 4,
+                  startCodeUnit: intro.length + rawTable.length + 4,
                   startRow: 6,
                 ),
               ],
@@ -1582,7 +1582,7 @@ Setext title
               _renderNode(
                 rawTable,
                 type: 'pipe_table',
-                startByte: 0,
+                startCodeUnit: 0,
                 startRow: 0,
                 endRow: 2,
               ),
@@ -1662,7 +1662,7 @@ Setext title
 
     const String selectedBlock = 'Selected block one keeps extending.';
     List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-      _renderNode(selectedBlock, startByte: 0),
+      _renderNode(selectedBlock, startCodeUnit: 0),
     ];
     late StateSetter updateHost;
 
@@ -1698,10 +1698,10 @@ Setext title
 
     updateHost(() {
       nodes = <MarkdownRenderNode>[
-        _renderNode(selectedBlock, startByte: 0),
+        _renderNode(selectedBlock, startCodeUnit: 0),
         _renderNode(
           'A streamed block arrives before the drag is released.',
-          startByte: selectedBlock.length + 2,
+          startCodeUnit: selectedBlock.length + 2,
           startRow: 2,
         ),
       ];
@@ -1726,7 +1726,7 @@ Setext title
     const Color selectionColor = Color(0x6658A6FF);
     const String selectedBlock = 'Selected block one stays anchored.';
     List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-      _renderNode(selectedBlock, startByte: 0),
+      _renderNode(selectedBlock, startCodeUnit: 0),
     ];
     late StateSetter updateHost;
 
@@ -1771,10 +1771,10 @@ Setext title
 
     updateHost(() {
       nodes = <MarkdownRenderNode>[
-        _renderNode(selectedBlock, startByte: 0),
+        _renderNode(selectedBlock, startCodeUnit: 0),
         _renderNode(
           'A streamed block arrives after selection has finalized.',
-          startByte: selectedBlock.length + 2,
+          startCodeUnit: selectedBlock.length + 2,
           startRow: 2,
         ),
       ];
@@ -1816,10 +1816,10 @@ Setext title
     const String firstBlock = 'First block becomes locked.';
     const String secondBlock = 'Second block must be selectable after lock.';
     List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-      _renderNode(firstBlock, startByte: 0),
+      _renderNode(firstBlock, startCodeUnit: 0),
       _renderNode(
         secondBlock,
-        startByte: firstBlock.length + 2,
+        startCodeUnit: firstBlock.length + 2,
         startRow: 2,
       ),
     ];
@@ -1871,15 +1871,15 @@ Setext title
     scrollController.jumpTo(10);
     updateHost(() {
       nodes = <MarkdownRenderNode>[
-        _renderNode(firstBlock, startByte: 0),
+        _renderNode(firstBlock, startCodeUnit: 0),
         _renderNode(
           secondBlock,
-          startByte: firstBlock.length + 2,
+          startCodeUnit: firstBlock.length + 2,
           startRow: 2,
         ),
         _renderNode(
           'Append while the previous selection is locked.',
-          startByte: firstBlock.length + secondBlock.length + 4,
+          startCodeUnit: firstBlock.length + secondBlock.length + 4,
           startRow: 4,
         ),
       ];
@@ -1937,10 +1937,10 @@ Setext title
 
     const String selectedBlock = 'Selected block one.';
     List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-      _renderNode(selectedBlock, startByte: 0),
+      _renderNode(selectedBlock, startCodeUnit: 0),
       _renderNode(
         'Streaming block two is visible while selection starts.',
-        startByte: 21,
+        startCodeUnit: 21,
         startRow: 2,
       ),
     ];
@@ -1997,15 +1997,15 @@ Setext title
 
     updateHost(() {
       nodes = <MarkdownRenderNode>[
-        _renderNode(selectedBlock, startByte: 0),
+        _renderNode(selectedBlock, startCodeUnit: 0),
         _renderNode(
           'Streaming block two is visible while selection starts.',
-          startByte: 21,
+          startCodeUnit: 21,
           startRow: 2,
         ),
         _renderNode(
           'Append lands while the existing selection is being scrolled.',
-          startByte: 73,
+          startCodeUnit: 73,
           startRow: 4,
         ),
       ];
@@ -2066,47 +2066,47 @@ class Greeter {
                 '# Copy Audit',
                 type: 'atx_heading',
                 content: 'Copy Audit',
-                startByte: 0,
+                startCodeUnit: 0,
                 startRow: 0,
               ),
-              _renderNode('Paragraph **bold**.', startByte: 20, startRow: 2),
+              _renderNode('Paragraph **bold**.', startCodeUnit: 20, startRow: 2),
               _renderNode(
                 '- one\n- two',
                 type: 'list',
-                startByte: 42,
+                startCodeUnit: 42,
                 startRow: 4,
                 endRow: 5,
               ),
               _renderNode(
                 '> quoted line\n> second line',
                 type: 'block_quote',
-                startByte: 55,
+                startCodeUnit: 55,
                 startRow: 7,
                 endRow: 8,
               ),
               _renderNode(
                 code,
                 type: 'fenced_code_block',
-                startByte: 85,
+                startCodeUnit: 85,
                 startRow: 10,
                 endRow: 13,
               ),
               _renderNode(
                 '| Name | Status |',
                 type: 'pipe_table_header',
-                startByte: 125,
+                startCodeUnit: 125,
                 startRow: 15,
               ),
               _renderNode(
                 '| --- | --- |',
                 type: 'pipe_table_delimiter_row',
-                startByte: 143,
+                startCodeUnit: 143,
                 startRow: 16,
               ),
               _renderNode(
                 '| Alpha | **Ready** |',
                 type: 'pipe_table_row',
-                startByte: 157,
+                startCodeUnit: 157,
                 startRow: 17,
               ),
             ],
@@ -2177,24 +2177,24 @@ class Greeter {
                 '# Footnotes',
                 type: 'atx_heading',
                 content: 'Footnotes',
-                startByte: 0,
+                startCodeUnit: 0,
                 startRow: 0,
               ),
               _renderNode(
                 'Streaming render can show footnote references inline.[^parser]',
-                startByte: 13,
+                startCodeUnit: 13,
                 startRow: 2,
               ),
               _renderNode(
                 'Multiple references can point at separate definitions.[^renderer]',
-                startByte: 76,
+                startCodeUnit: 76,
                 startRow: 4,
               ),
               _renderNode(
                 '[^parser]: The parser emits footnote definition nodes.\n'
                 '[^renderer]: The renderer displays definitions as compact rows.',
                 type: 'footnote_definition',
-                startByte: 141,
+                startCodeUnit: 141,
                 startRow: 6,
                 endRow: 7,
               ),
@@ -2202,13 +2202,13 @@ class Greeter {
                 '# HTML blocks',
                 type: 'atx_heading',
                 content: 'HTML blocks',
-                startByte: 256,
+                startCodeUnit: 256,
                 startRow: 9,
               ),
               _renderNode(
                 '<section>\n  <h2>HTML block</h2>\n</section>',
                 type: 'html_block',
-                startByte: 271,
+                startCodeUnit: 271,
                 startRow: 11,
                 endRow: 13,
               ),
@@ -2303,11 +2303,11 @@ class Greeter {
   ) async {
     final MarkdownRenderNode existing = _renderNode(
       'Existingstableword should continue fading',
-      startByte: 40,
+      startCodeUnit: 40,
     );
     final MarkdownRenderNode inserted = _renderNode(
       'Inserted block',
-      startByte: 0,
+      startCodeUnit: 0,
     );
     List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[existing];
     late StateSetter updateHost;
@@ -2366,11 +2366,11 @@ class Greeter {
   ) async {
     final MarkdownRenderNode existing = _renderNode(
       'Sliverstableword should continue fading',
-      startByte: 40,
+      startCodeUnit: 40,
     );
     final MarkdownRenderNode inserted = _renderNode(
       'Inserted sliver block',
-      startByte: 0,
+      startCodeUnit: 0,
     );
     List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[existing];
     late StateSetter updateHost;
@@ -2559,11 +2559,11 @@ class Greeter {
         home: Scaffold(
           body: StreamingMarkdownRenderView(
             nodes: <MarkdownRenderNode>[
-              _renderNode('Has a note[^alpha].', startByte: 0),
+              _renderNode('Has a note[^alpha].', startCodeUnit: 0),
               _renderNode(
                 '[^alpha]: Definition body',
                 type: 'footnote_definition',
-                startByte: 20,
+                startCodeUnit: 20,
               ),
             ],
             padding: EdgeInsets.zero,
@@ -2687,14 +2687,14 @@ class Greeter {
               _renderNode(
                 '[^parser]: The parser emits footnote definition nodes.',
                 type: 'link_reference_definition',
-                startByte: 0,
+                startCodeUnit: 0,
                 startRow: 0,
                 endRow: 0,
               ),
               _renderNode(
                 '[^renderer]: The renderer displays definitions as compact rows.',
                 type: 'link_reference_definition',
-                startByte: 56,
+                startCodeUnit: 56,
                 startRow: 1,
                 endRow: 1,
               ),
@@ -2787,7 +2787,7 @@ class Greeter {
                 'Setext heading level 2\n----------------------',
                 type: 'setext_heading',
                 content: '',
-                startByte: 45,
+                startCodeUnit: 45,
                 startRow: 3,
                 endRow: 4,
               ),
@@ -2841,7 +2841,7 @@ class Greeter {
             nodes: <MarkdownRenderNode>[
               _renderNode('Before'),
               _renderNode('___', type: 'thematic_break', content: ''),
-              _renderNode('After', startByte: 10),
+              _renderNode('After', startCodeUnit: 10),
             ],
             padding: EdgeInsets.zero,
             tokenFadeInDuration: Duration.zero,
@@ -2892,14 +2892,14 @@ class Greeter {
               _renderNode(
                 '| A | B |\n| --- | --- |\n| C | D |',
                 type: 'pipe_table',
-                startByte: 0,
+                startCodeUnit: 0,
                 startRow: 0,
                 endRow: 2,
               ),
               _renderNode(
                 '| E | F |\n| --- | --- |\n| G | H |',
                 type: 'pipe_table',
-                startByte: 34,
+                startCodeUnit: 34,
                 startRow: 4,
                 endRow: 6,
               ),
@@ -2931,32 +2931,32 @@ class Greeter {
               _renderNode(
                 '| Case | Markdown | Rendered behavior |',
                 type: 'pipe_table_header',
-                startByte: 0,
+                startCodeUnit: 0,
                 startRow: 0,
               ),
               _renderNode(
                 '| :--- | :------: | ---------------: |',
                 type: 'pipe_table_delimiter_row',
-                startByte: 39,
+                startCodeUnit: 39,
                 startRow: 1,
               ),
               _renderNode(
                 '| Inline code | `a | b` | Keeps pipe inside code |',
                 type: 'pipe_table_row',
-                startByte: 78,
+                startCodeUnit: 78,
                 startRow: 2,
               ),
               _renderNode(
                 r'| Escaped pipe | `a \| b` | Keeps escaped separator |',
                 type: 'pipe_table_row',
-                startByte: 131,
+                startCodeUnit: 131,
                 startRow: 3,
               ),
               _renderNode(
                 '| Link | [docs](https://docs.flutter.dev) | '
                 'Tappable cell content |',
                 type: 'pipe_table_row',
-                startByte: 187,
+                startCodeUnit: 187,
                 startRow: 4,
               ),
             ],
@@ -3312,15 +3312,15 @@ MarkdownRenderNode _renderNode(
   String raw, {
   String type = 'paragraph',
   String? content,
-  int startByte = 0,
+  int startCodeUnit = 0,
   int startRow = 0,
   int? endRow,
 }) {
   return MarkdownRenderNode(
     type: type,
     depth: 0,
-    startByte: startByte,
-    endByte: startByte + raw.length,
+    startCodeUnit: startCodeUnit,
+    endCodeUnit: startCodeUnit + raw.length,
     startRow: startRow,
     endRow: endRow ?? startRow,
     raw: raw,

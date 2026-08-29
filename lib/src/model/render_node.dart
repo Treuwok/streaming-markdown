@@ -1,7 +1,7 @@
 /// Normalized markdown block passed from the parser to the renderer.
 ///
 /// A render node keeps both the original source slice ([raw]) and parser
-/// metadata such as source byte offsets and row numbers. Most applications do
+/// metadata such as source offsets and row numbers. Most applications do
 /// not create these manually; use [StreamingMarkdownParseWorker] and render the
 /// returned `result.blocks` with `AnimatedStreamingMarkdown`.
 class MarkdownRenderNode {
@@ -9,8 +9,8 @@ class MarkdownRenderNode {
   const MarkdownRenderNode({
     required this.type,
     required this.depth,
-    required this.startByte,
-    required this.endByte,
+    required this.startCodeUnit,
+    required this.endCodeUnit,
     required this.startRow,
     required this.endRow,
     required this.raw,
@@ -30,11 +30,23 @@ class MarkdownRenderNode {
       return 0;
     }
 
+    // A map still speaking the old key is a producer that never had its
+    // offsets converted, and its numbers are UTF-8 bytes. Reading them as code
+    // units would be wrong by a factor of three on this product's content and
+    // would say nothing at all — so it stops here instead.
+    if (map.containsKey('startByte') || map.containsKey('endByte')) {
+      throw ArgumentError(
+        'render node map carries startByte/endByte: those were UTF-8 bytes on '
+        'the native path and code units on the pure-Dart one. Convert at the '
+        'producer and emit startCodeUnit/endCodeUnit.',
+      );
+    }
+
     return MarkdownRenderNode(
       type: (map['type'] as String?) ?? 'unknown',
       depth: readInt('depth'),
-      startByte: readInt('startByte'),
-      endByte: readInt('endByte'),
+      startCodeUnit: readInt('startCodeUnit'),
+      endCodeUnit: readInt('endCodeUnit'),
       startRow: readInt('startRow'),
       endRow: readInt('endRow'),
       raw: (map['raw'] as String?) ?? '',
@@ -49,11 +61,20 @@ class MarkdownRenderNode {
   /// Nesting depth in the source syntax tree.
   final int depth;
 
-  /// Inclusive UTF-8 byte offset where this block starts in the source.
-  final int startByte;
+  /// Inclusive offset where this block starts, in UTF-16 code units — the
+  /// unit a Dart `String` is indexed in, so `source.substring(startCodeUnit,
+  /// endCodeUnit)` is this block.
+  ///
+  /// These were called `startByte` / `endByte`, and on the native path they
+  /// really were bytes while on the pure-Dart path they were code units. The
+  /// two numbers are equal for ASCII, so the field carried both units for as
+  /// long as nobody wrote a non-Latin character — and this product's content
+  /// is Chinese. The conversion now happens once, where each parser's output
+  /// is turned into a node, and every consumer gets one unit.
+  final int startCodeUnit;
 
-  /// Exclusive UTF-8 byte offset where this block ends in the source.
-  final int endByte;
+  /// Exclusive end of this block, in the same unit as [startCodeUnit].
+  final int endCodeUnit;
 
   /// Zero-based source row where this block starts.
   final int startRow;

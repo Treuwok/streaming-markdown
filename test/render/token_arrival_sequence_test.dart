@@ -207,12 +207,12 @@ void main() {
   });
 }
 
-MarkdownRenderNode _node(String raw, int startByte) {
+MarkdownRenderNode _node(String raw, int startCodeUnit) {
   return MarkdownRenderNode(
     type: 'paragraph',
     depth: 0,
-    startByte: startByte,
-    endByte: startByte + raw.length,
+    startCodeUnit: startCodeUnit,
+    endCodeUnit: startCodeUnit + raw.length,
     startRow: 0,
     endRow: 0,
     raw: raw,

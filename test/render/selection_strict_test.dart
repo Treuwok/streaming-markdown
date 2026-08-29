@@ -19,7 +19,7 @@ void main() {
   group('selection semantics unit', () {
     test('full block selection returns full raw markdown', () {
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-        _node('paragraph', 'Prefix **bold** suffix', startByte: 0),
+        _node('paragraph', 'Prefix **bold** suffix', startCodeUnit: 0),
       ];
 
       final String copied =
@@ -34,7 +34,7 @@ void main() {
     test('partial selection adds delimiters when cut through inline token', () {
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
         _node('paragraph', 'Prefix [OpenAI](https://openai.com) suffix',
-            startByte: 0),
+            startCodeUnit: 0),
       ];
 
       final String copied =
@@ -51,7 +51,7 @@ void main() {
         _node(
           'paragraph',
           'Prefix **bold** _italic_ ~~strike~~ `code` suffix',
-          startByte: 0,
+          startCodeUnit: 0,
         ),
       ];
 
@@ -87,7 +87,7 @@ void main() {
 
     test('partial inline formatting respects block edge delimiter rules', () {
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-        _node('paragraph', '**bold**', startByte: 0),
+        _node('paragraph', '**bold**', startCodeUnit: 0),
       ];
 
       expect(
@@ -109,14 +109,14 @@ void main() {
     test('full selection returns full raw markdown for every core block', () {
       final Map<MarkdownRenderNode, String> cases =
           <MarkdownRenderNode, String>{
-        _node('atx_heading', '# Heading', startByte: 0, content: 'Heading'):
+        _node('atx_heading', '# Heading', startCodeUnit: 0, content: 'Heading'):
             'Heading',
-        _node('paragraph', 'Text **bold**', startByte: 20): 'Text bold',
-        _node('list', '- one\n- two', startByte: 40): 'one\ntwo',
-        _node('block_quote', '> quote', startByte: 60): 'quote',
-        _node('fenced_code_block', '```dart\nprint(1);\n```', startByte: 80):
+        _node('paragraph', 'Text **bold**', startCodeUnit: 20): 'Text bold',
+        _node('list', '- one\n- two', startCodeUnit: 40): 'one\ntwo',
+        _node('block_quote', '> quote', startCodeUnit: 60): 'quote',
+        _node('fenced_code_block', '```dart\nprint(1);\n```', startCodeUnit: 80):
             'print(1);',
-        _node('thematic_break', '---', startByte: 110): '',
+        _node('thematic_break', '---', startCodeUnit: 110): '',
       };
 
       for (final MapEntry<MarkdownRenderNode, String> entry in cases.entries) {
@@ -132,7 +132,7 @@ void main() {
 
     test('partial list quote and code selections keep markdown semantics', () {
       final List<MarkdownRenderNode> listNodes = <MarkdownRenderNode>[
-        _node('list', '- one\n- **two**\n1. three', startByte: 0),
+        _node('list', '- one\n- **two**\n1. three', startCodeUnit: 0),
       ];
       expect(
         StreamingMarkdownRenderView.debugMarkdownForSelectedPlainText(
@@ -143,7 +143,7 @@ void main() {
       );
 
       final List<MarkdownRenderNode> quoteNodes = <MarkdownRenderNode>[
-        _node('block_quote', '> first\n> second', startByte: 0),
+        _node('block_quote', '> first\n> second', startCodeUnit: 0),
       ];
       expect(
         StreamingMarkdownRenderView.debugMarkdownForSelectedPlainText(
@@ -157,7 +157,7 @@ void main() {
         _node(
           'fenced_code_block',
           '```dart\nfinal a = 1;\nprint(a);\n```',
-          startByte: 0,
+          startCodeUnit: 0,
         ),
       ];
       expect(
@@ -171,7 +171,7 @@ void main() {
 
     test('partial inline link edge selections remain deterministic', () {
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-        _node('paragraph', '[docs](https://docs.flutter.dev)', startByte: 0),
+        _node('paragraph', '[docs](https://docs.flutter.dev)', startCodeUnit: 0),
       ];
 
       expect(
@@ -192,9 +192,9 @@ void main() {
 
     test('multi-block selection is joined with double newlines', () {
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-        _node('atx_heading', '# H1', startByte: 0, content: 'H1'),
-        _node('paragraph', 'Body paragraph', startByte: 5),
-        _node('thematic_break', '---', startByte: 20),
+        _node('atx_heading', '# H1', startCodeUnit: 0, content: 'H1'),
+        _node('paragraph', 'Body paragraph', startCodeUnit: 5),
+        _node('thematic_break', '---', startCodeUnit: 20),
       ];
 
       final String copied =
@@ -210,8 +210,8 @@ void main() {
         'range-based selection can target repeated plain text deterministically',
         () {
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-        _node('paragraph', 'first **repeat** marker', startByte: 0),
-        _node('paragraph', 'second **repeat** marker', startByte: 32),
+        _node('paragraph', 'first **repeat** marker', startCodeUnit: 0),
+        _node('paragraph', 'second **repeat** marker', startCodeUnit: 32),
       ];
 
       final String fullPlain = StreamingMarkdownRenderView.debugFullPlainText(
@@ -235,7 +235,7 @@ void main() {
     test('markdown source range remains absolute when streamed content appends',
         () {
       final List<MarkdownRenderNode> initialNodes = <MarkdownRenderNode>[
-        _node('paragraph', 'Alpha target Omega', startByte: 0),
+        _node('paragraph', 'Alpha target Omega', startCodeUnit: 0),
       ];
       final (int, int)? sourceRange = StreamingMarkdownRenderView
           .debugMarkdownSourceRangeForSelectedPlainText(
@@ -245,8 +245,8 @@ void main() {
       expect(sourceRange, isNotNull);
 
       final List<MarkdownRenderNode> streamedNodes = <MarkdownRenderNode>[
-        _node('paragraph', 'Alpha target Omega', startByte: 0),
-        _node('paragraph', 'Streaming tail still growing', startByte: 20),
+        _node('paragraph', 'Alpha target Omega', startCodeUnit: 0),
+        _node('paragraph', 'Streaming tail still growing', startCodeUnit: 20),
       ];
       final String copied =
           StreamingMarkdownRenderView.debugMarkdownForSourceRange(
@@ -271,44 +271,44 @@ void main() {
           '| Beta | Streaming | **Formatted** cell |';
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
         _node('atx_heading', '# Tables',
-            startByte: 0, startRow: 0, content: 'Tables'),
+            startCodeUnit: 0, startRow: 0, content: 'Tables'),
         _node('pipe_table_header', '| Case | Markdown | Rendered behavior |',
-            startByte: 10, startRow: 2),
+            startCodeUnit: 10, startRow: 2),
         _node(
           'pipe_table_delimiter_row',
           '| :--- | :------: | ---------------: |',
-          startByte: 49,
+          startCodeUnit: 49,
           startRow: 3,
         ),
         _node(
           'pipe_table_row',
           '| Inline code | `a | b` | Keeps pipe inside code |',
-          startByte: 88,
+          startCodeUnit: 88,
           startRow: 4,
         ),
         _node(
           'pipe_table_row',
           r'| Escaped pipe | `a \| b` | Keeps escaped separator |',
-          startByte: 141,
+          startCodeUnit: 141,
           startRow: 5,
         ),
         _node(
           'pipe_table_row',
           '| Link | [docs](https://docs.flutter.dev) | '
               'Tappable cell content |',
-          startByte: 197,
+          startCodeUnit: 197,
           startRow: 6,
         ),
         _node('pipe_table_header', '| Name | Status | Notes |',
-            startByte: 266, startRow: 8),
+            startCodeUnit: 266, startRow: 8),
         _node('pipe_table_delimiter_row', '| --- | --- | --- |',
-            startByte: 291, startRow: 9),
+            startCodeUnit: 291, startRow: 9),
         _node('pipe_table_row', '| Alpha | Ready | Basic cells |',
-            startByte: 309, startRow: 10),
+            startCodeUnit: 309, startRow: 10),
         _node(
           'pipe_table_row',
           '| Beta | Streaming | **Formatted** cell |',
-          startByte: 339,
+          startCodeUnit: 339,
           startRow: 11,
         ),
       ];
@@ -332,15 +332,15 @@ void main() {
     test('partial table selection stops at selected cell boundary', () {
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
         _node('pipe_table_header', '| Name | Status | Notes |',
-            startByte: 0, startRow: 0),
+            startCodeUnit: 0, startRow: 0),
         _node('pipe_table_delimiter_row', '| --- | --- | --- |',
-            startByte: 25, startRow: 1),
+            startCodeUnit: 25, startRow: 1),
         _node('pipe_table_row', '| Alpha | Ready | Basic cells |',
-            startByte: 43, startRow: 2),
+            startCodeUnit: 43, startRow: 2),
         _node(
           'pipe_table_row',
           '| Beta | Streaming | **Formatted** cell |',
-          startByte: 74,
+          startCodeUnit: 74,
           startRow: 3,
         ),
       ];
@@ -364,15 +364,15 @@ void main() {
     test('partial table selection supports cell-only and formatted cells', () {
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
         _node('pipe_table_header', '| Name | Status | Notes |',
-            startByte: 0, startRow: 0),
+            startCodeUnit: 0, startRow: 0),
         _node('pipe_table_delimiter_row', '| --- | --- | --- |',
-            startByte: 25, startRow: 1),
+            startCodeUnit: 25, startRow: 1),
         _node('pipe_table_row', '| Alpha | Ready | Basic cells |',
-            startByte: 43, startRow: 2),
+            startCodeUnit: 43, startRow: 2),
         _node(
           'pipe_table_row',
           '| Beta | Streaming | **Formatted** cell |',
-          startByte: 74,
+          startCodeUnit: 74,
           startRow: 3,
         ),
       ];
@@ -399,9 +399,9 @@ void main() {
 
     test('multi-block selection preserves list quote and code markdown', () {
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-        _node('list', '- one\n- two', startByte: 0),
-        _node('block_quote', '> quoted', startByte: 12),
-        _node('fenced_code_block', '```dart\nprint(1);\n```', startByte: 22),
+        _node('list', '- one\n- two', startCodeUnit: 0),
+        _node('block_quote', '> quoted', startCodeUnit: 12),
+        _node('fenced_code_block', '```dart\nprint(1);\n```', startCodeUnit: 22),
       ];
 
       final String copied =
@@ -418,9 +418,9 @@ void main() {
 
     test('empty block can still be preserved in copy output', () {
       final List<MarkdownRenderNode> nodes = <MarkdownRenderNode>[
-        _node('paragraph', 'A', startByte: 0),
-        _node('thematic_break', '---', startByte: 1),
-        _node('paragraph', 'B', startByte: 4),
+        _node('paragraph', 'A', startCodeUnit: 0),
+        _node('thematic_break', '---', startCodeUnit: 1),
+        _node('paragraph', 'B', startCodeUnit: 4),
       ];
 
       final String copied =
@@ -464,11 +464,11 @@ void main() {
           Scaffold(
             body: StreamingMarkdownRenderView(
               nodes: <MarkdownRenderNode>[
-                _node('paragraph', 'Prefix **bold** suffix', startByte: 0),
-                _node('list', '- one\n- two', startByte: 24),
+                _node('paragraph', 'Prefix **bold** suffix', startCodeUnit: 0),
+                _node('list', '- one\n- two', startCodeUnit: 24),
                 _node('fenced_code_block', '```dart\nprint(1);\n```',
-                    startByte: 36),
-                _node('block_quote', '> quote', startByte: 58),
+                    startCodeUnit: 36),
+                _node('block_quote', '> quote', startCodeUnit: 58),
               ],
               enableTextSelection: true,
               tokenFadeInDuration: Duration.zero,
@@ -507,10 +507,10 @@ void main() {
               body: StreamingMarkdownRenderView(
                 nodes: <MarkdownRenderNode>[
                   _node('atx_heading', '# Title',
-                      startByte: 0, content: 'Title'),
+                      startCodeUnit: 0, content: 'Title'),
                   _node('paragraph', 'Paragraph with **bold** text.',
-                      startByte: 7),
-                  _node('list', '- a\n- b', startByte: 37),
+                      startCodeUnit: 7),
+                  _node('list', '- a\n- b', startCodeUnit: 37),
                 ],
                 enableTextSelection: enableSelection,
                 tokenFadeInDuration: Duration.zero,
@@ -547,10 +547,10 @@ void main() {
               body: StreamingMarkdownRenderView(
                 nodes: <MarkdownRenderNode>[
                   _node('atx_heading', '# Golden Title',
-                      startByte: 0, content: 'Golden Title'),
+                      startCodeUnit: 0, content: 'Golden Title'),
                   _node('paragraph', 'Body with **bold** and _italic_.',
-                      startByte: 15),
-                  _node('list', '- first\n- second', startByte: 48),
+                      startCodeUnit: 15),
+                  _node('list', '- first\n- second', startCodeUnit: 48),
                 ],
                 enableTextSelection: false,
                 tokenFadeInDuration: Duration.zero,
@@ -580,10 +580,10 @@ void main() {
               body: StreamingMarkdownRenderView(
                 nodes: <MarkdownRenderNode>[
                   _node('atx_heading', '# Golden Title',
-                      startByte: 0, content: 'Golden Title'),
+                      startCodeUnit: 0, content: 'Golden Title'),
                   _node('paragraph', 'Body with **bold** and _italic_.',
-                      startByte: 15),
-                  _node('list', '- first\n- second', startByte: 48),
+                      startCodeUnit: 15),
+                  _node('list', '- first\n- second', startCodeUnit: 48),
                 ],
                 enableTextSelection: true,
                 tokenFadeInDuration: Duration.zero,
@@ -611,13 +611,13 @@ void main() {
             'paragraph',
             'Inline [link](https://example.com), _italic_, '
                 '**bold**, ~~strike~~, and `code`.',
-            startByte: 0),
+            startCodeUnit: 0),
         _node('paragraph',
             'Reference [docs][repo] and underscore_like_words stay clean.',
-            startByte: 76),
+            startCodeUnit: 76),
         _node('link_reference_definition',
             '[repo]: https://github.com/samnn152/streaming-markdown',
-            startByte: 139),
+            startCodeUnit: 139),
       ];
 
       Future<void> pumpFrame(bool enableSelection) async {
@@ -766,7 +766,7 @@ List<MarkdownRenderNode> _allSupportedBlockNodes() {
     final MarkdownRenderNode node = _node(
       type,
       raw,
-      startByte: start,
+      startCodeUnit: start,
       content: content,
     );
     start += raw.length + 2;
@@ -803,7 +803,7 @@ List<MarkdownRenderNode> _animationNodes({required bool includeHalfToken}) {
     final MarkdownRenderNode node = _node(
       type,
       raw,
-      startByte: start,
+      startCodeUnit: start,
       content: content,
     );
     start += raw.length + 2;
@@ -942,20 +942,20 @@ List<MarkdownRenderNode> _parseRenderNodesFromMarkdown(String markdown) {
       return _node(
         'atx_heading',
         raw,
-        startByte: block.start,
+        startCodeUnit: block.start,
         content: block.text,
       );
     }
     if (block is ParagraphNode) {
-      return _node('paragraph', raw, startByte: block.start);
+      return _node('paragraph', raw, startCodeUnit: block.start);
     }
     if (block is ListNode) {
-      return _node('list', raw, startByte: block.start);
+      return _node('list', raw, startCodeUnit: block.start);
     }
     if (block is CodeFenceNode) {
-      return _node('fenced_code_block', raw, startByte: block.start);
+      return _node('fenced_code_block', raw, startCodeUnit: block.start);
     }
-    return _node('paragraph', raw, startByte: block.start);
+    return _node('paragraph', raw, startCodeUnit: block.start);
   }).toList(growable: false);
 }
 
@@ -978,7 +978,7 @@ int _inlineSelectionProxyCount(WidgetTester tester) {
 MarkdownRenderNode _node(
   String type,
   String raw, {
-  required int startByte,
+  required int startCodeUnit,
   int startRow = 0,
   int? endRow,
   String? content,
@@ -986,8 +986,8 @@ MarkdownRenderNode _node(
   return MarkdownRenderNode(
     type: type,
     depth: 0,
-    startByte: startByte,
-    endByte: startByte + raw.length,
+    startCodeUnit: startCodeUnit,
+    endCodeUnit: startCodeUnit + raw.length,
     startRow: startRow,
     endRow: endRow ?? startRow,
     raw: raw,

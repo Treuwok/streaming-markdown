@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import '../model/block_nodes.dart';
 import '../model/render_node.dart';
+import '../model/utf8_code_unit_index.dart';
 import '../native/incremental_parser.dart';
 import '../native/symbols.dart';
 import '../parser/rope_markdown_parser.dart';
@@ -317,6 +318,13 @@ class MarkdownSyncParser {
   NativeIncrementalMarkdownParser? _native;
   bool _nativeAvailable = false;
   final RopeString _fallbackRope = RopeString();
+  /// The document the NATIVE parser has accumulated, for translating its
+  /// byte offsets. Not the same thing as [_fallbackRope], which only fills
+  /// when there is no native parser.
+  final StringBuffer _nativeSource = StringBuffer();
+
+  /// A trailing high surrogate held back so native never encodes half a pair.
+  String _nativeCarry = '';
 
   /// Parses a complete markdown string without keeping parser state.
   static StreamingMarkdownParseResult parseMarkdown(
@@ -380,11 +388,26 @@ class MarkdownSyncParser {
     String mode;
     final NativeIncrementalMarkdownParser? native = _native;
     if (_nativeAvailable && native != null) {
-      final bool ok =
-          op == 'append' ? native.appendText(text) : native.setText(text);
+      // Same reasons as the isolate: the native parser accumulates, so its
+      // node offsets are into the whole document while `text` is only this
+      // chunk — and a surrogate pair straddling two chunks would reach native
+      // as two replacement characters while the remembered string joins it.
+      if (op != 'append') {
+        _nativeSource.clear();
+    _nativeCarry = '';
+        _nativeCarry = '';
+      }
+      final ({String send, String carry}) chunk =
+          splitOffPendingSurrogate(_nativeCarry, text);
+      _nativeCarry = chunk.carry;
+
+      final bool ok = op == 'append'
+          ? native.appendText(chunk.send)
+          : native.setText(chunk.send);
       if (!ok) {
         throw StateError('Native incremental parse failed');
       }
+      _nativeSource.write(chunk.send);
       mode = op == 'append' ? 'sync-incremental-append' : 'sync-full-set';
     } else {
       if (op == 'append') {
@@ -413,7 +436,8 @@ class MarkdownSyncParser {
       blockCount = native.blockCount();
       inlineTypeCount = native.inlineTypeCount();
       renderNodes = includeNodes
-          ? _nodesFromMaps(_normalizeVisibleNodes(native.blockNodes()))
+          ? _nodesFromMaps(
+              _normalizeVisibleNodes(native.blockNodes(), _nativeSource.toString()))
           : const <MarkdownRenderNode>[];
     } else {
       final MarkdownDocument document =
@@ -448,6 +472,7 @@ class MarkdownSyncParser {
     _native = null;
     _nativeAvailable = false;
     _fallbackRope.clear();
+    _nativeSource.clear();
   }
 
   static List<MarkdownRenderNode> _nodesFromMaps(
@@ -467,8 +492,8 @@ class MarkdownSyncParser {
       return MarkdownRenderNode(
         type: _fallbackNodeType(block),
         depth: 0,
-        startByte: block.start,
-        endByte: block.end,
+        startCodeUnit: block.start,
+        endCodeUnit: block.end,
         startRow: startRow,
         endRow: endRow,
         raw: raw,

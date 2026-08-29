@@ -6,7 +6,7 @@ abstract class MarkdownBlockNode {
   /// Inclusive start offset of the node in the source string.
   ///
   /// UTF-16 code units, the unit `String` is indexed in — NOT bytes, despite
-  /// what the mirrored `MarkdownRenderNode.startByte` is called. They differ
+  /// what the mirrored `MarkdownRenderNode.startCodeUnit` is called. They differ
   /// the moment the source stops being ASCII.
   final int start;
 

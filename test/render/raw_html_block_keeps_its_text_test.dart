@@ -15,8 +15,8 @@ const String _source = '<div>\nImportant answer\n</div>';
 MarkdownRenderNode _htmlBlock(String source) => MarkdownRenderNode(
       type: 'html_block',
       depth: 0,
-      startByte: 0,
-      endByte: source.length,
+      startCodeUnit: 0,
+      endCodeUnit: source.length,
       startRow: 0,
       endRow: 2,
       raw: source,
@@ -27,8 +27,8 @@ MarkdownRenderNode _paragraphNode(String source, int start) =>
     MarkdownRenderNode(
       type: 'paragraph',
       depth: 0,
-      startByte: start,
-      endByte: start + source.length,
+      startCodeUnit: start,
+      endCodeUnit: start + source.length,
       startRow: 0,
       endRow: 0,
       raw: source,

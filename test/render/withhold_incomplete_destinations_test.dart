@@ -17,8 +17,8 @@ import 'package:flutter_test/flutter_test.dart';
 MarkdownRenderNode _paragraph(String source) => MarkdownRenderNode(
       type: 'paragraph',
       depth: 0,
-      startByte: 0,
-      endByte: source.length,
+      startCodeUnit: 0,
+      endCodeUnit: source.length,
       startRow: 0,
       endRow: 0,
       raw: source,
@@ -233,8 +233,8 @@ void main() {
             MarkdownRenderNode(
               type: 'block_quote',
               depth: 0,
-              startByte: 0,
-              endByte: 32,
+              startCodeUnit: 0,
+              endCodeUnit: 32,
               startRow: 0,
               endRow: 0,
               raw: '> see [x](https://secret.example',

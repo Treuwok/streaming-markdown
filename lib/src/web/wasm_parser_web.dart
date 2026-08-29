@@ -6,6 +6,7 @@ import 'dart:html' as html;
 import 'dart:js' as js;
 
 import '../model/render_node.dart';
+import '../model/utf8_code_unit_index.dart';
 
 typedef _WasmStringParser = String? Function(String input);
 typedef _WasmBlockNodeParser = String? Function(String input, int maxNodes);
@@ -49,9 +50,12 @@ class StreamingMarkdownWasmParser {
       return null;
     }
 
+    // Same reason as the isolate's funnel: the wasm build is the same
+    // tree-sitter, so its offsets are bytes and have to be translated here.
+    final Utf8CodeUnitIndex index = Utf8CodeUnitIndex(markdown);
     return decoded
         .whereType<Map<dynamic, dynamic>>()
-        .map(_normalizeRenderNode)
+        .map((Map<dynamic, dynamic> map) => _normalizeRenderNode(map, index))
         .where((MarkdownRenderNode node) => !_shouldDropNode(node))
         .toList(growable: false);
   }
@@ -169,17 +173,39 @@ class StreamingMarkdownWasmParser {
     ]) as js.JsFunction;
   }
 
-  static MarkdownRenderNode _normalizeRenderNode(Map<dynamic, dynamic> map) {
-    final MarkdownRenderNode node = MarkdownRenderNode.fromDynamicMap(map);
+  /// Builds a node from the wasm parser's own JSON.
+  ///
+  /// Read field by field rather than through `fromDynamicMap`: this map is the
+  /// wasm build of the same tree-sitter, so it speaks `startByte` and means
+  /// bytes. `fromDynamicMap` refuses that key on purpose — a producer still
+  /// using it has not converted — so handing it this map would throw on every
+  /// web parse. Converted here, then constructed.
+  static MarkdownRenderNode _normalizeRenderNode(
+    Map<dynamic, dynamic> map,
+    Utf8CodeUnitIndex index,
+  ) {
+    int readInt(String key) {
+      final Object? value = map[key];
+      if (value is int) {
+        return value;
+      }
+      if (value is num) {
+        return value.toInt();
+      }
+      return 0;
+    }
+
+    final String type = (map['type'] as String?) ?? 'unknown';
+    final String raw = (map['raw'] as String?) ?? '';
     return MarkdownRenderNode(
-      type: node.type,
-      depth: node.depth,
-      startByte: node.startByte,
-      endByte: node.endByte,
-      startRow: node.startRow,
-      endRow: node.endRow,
-      raw: node.raw,
-      content: _meaningfulContent(node.type, node.raw),
+      type: type,
+      depth: readInt('depth'),
+      startCodeUnit: index.codeUnitFor(readInt('startByte')),
+      endCodeUnit: index.codeUnitFor(readInt('endByte')),
+      startRow: readInt('startRow'),
+      endRow: readInt('endRow'),
+      raw: raw,
+      content: _meaningfulContent(type, raw),
     );
   }
 

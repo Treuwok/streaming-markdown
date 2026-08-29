@@ -19,8 +19,8 @@ Widget _host({required bool ownsSelectionArea}) => MaterialApp(
               MarkdownRenderNode(
                 type: 'paragraph',
                 depth: 0,
-                startByte: 0,
-                endByte: 5,
+                startCodeUnit: 0,
+                endCodeUnit: 5,
                 startRow: 0,
                 endRow: 0,
                 raw: 'hello',

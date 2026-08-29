@@ -383,8 +383,8 @@ class MarkdownSyncParser {
       return MarkdownRenderNode(
         type: _fallbackNodeType(block),
         depth: 0,
-        startByte: block.start,
-        endByte: block.end,
+        startCodeUnit: block.start,
+        endCodeUnit: block.end,
         startRow: startRow,
         endRow: endRow,
         raw: raw,

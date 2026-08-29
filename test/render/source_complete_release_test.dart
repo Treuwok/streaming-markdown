@@ -3,7 +3,7 @@ import 'package:animated_streaming_markdown/animated_streaming_markdown.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 MarkdownRenderNode _p(String s) => MarkdownRenderNode(type: 'paragraph', depth: 0,
-    startByte: 0, endByte: s.length, startRow: 0, endRow: 0, raw: s, content: s);
+    startCodeUnit: 0, endCodeUnit: s.length, startRow: 0, endRow: 0, raw: s, content: s);
 Widget _h(String s, {required bool complete}) => MaterialApp(home: Scaffold(
     body: AnimatedStreamingMarkdown(blocks: [_p(s)],
       withholdIncompleteDestinations: true, suppressRawHtml: true, sourceComplete: complete,

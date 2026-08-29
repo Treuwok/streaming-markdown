@@ -7,6 +7,11 @@ void _parseWorkerMain(SendPort mainSendPort) {
   NativeIncrementalMarkdownParser? incremental;
   bool nativeAvailable = false;
   final RopeString fallbackRope = RopeString();
+  // The document the NATIVE parser has accumulated. Its node offsets are
+  // relative to this, not to whichever chunk arrived last.
+  final StringBuffer nativeSource = StringBuffer();
+  // A trailing high surrogate held back so native never encodes half a pair.
+  String nativeCarry = '';
 
   if (isStreamingMarkdownNativeLibraryAvailable) {
     try {
@@ -40,12 +45,30 @@ void _parseWorkerMain(SendPort mainSendPort) {
 
       String mode = 'fallback-dart';
       if (nativeAvailable && incremental != null) {
+        // The native parser accumulates; `text` is only what arrived this
+        // time. Its node offsets are into the WHOLE document, so translating
+        // them needs the whole document — an index built from the chunk clamps
+        // every offset past it and corrupts the ranges for ASCII too.
+        //
+        // What is sent and what is remembered must be the SAME text, including
+        // when a surrogate pair straddles two chunks: native encodes each
+        // chunk on its own and would turn the halves into two replacement
+        // characters, six bytes where the joined string is four.
+        if (op != 'append') {
+          nativeSource.clear();
+          nativeCarry = '';
+        }
+        final ({String send, String carry}) chunk =
+            splitOffPendingSurrogate(nativeCarry, text);
+        nativeCarry = chunk.carry;
+
         final bool ok = op == 'append'
-            ? incremental.appendText(text)
-            : incremental.setText(text);
+            ? incremental.appendText(chunk.send)
+            : incremental.setText(chunk.send);
         if (!ok) {
           throw StateError('Native incremental parse failed');
         }
+        nativeSource.write(chunk.send);
         mode = op == 'append' ? 'incremental-append' : 'full-set';
       } else {
         if (op == 'append') {
@@ -71,7 +94,8 @@ void _parseWorkerMain(SendPort mainSendPort) {
         blockCount = incremental.blockCount();
         inlineTypeCount = incremental.inlineTypeCount();
         if (includeNodes) {
-          renderNodes = _normalizeVisibleNodes(incremental.blockNodes());
+          renderNodes = _normalizeVisibleNodes(
+              incremental.blockNodes(), nativeSource.toString());
           visibleNodes = renderNodes;
         } else {
           renderNodes = <Map<String, Object>>[];
@@ -126,9 +150,20 @@ int _msgInt(Object? value, {int fallback = 0}) {
   return fallback;
 }
 
+/// Turns the native parser's node maps into the shape the render node model
+/// expects — including its coordinates.
+///
+/// [source] is required because tree-sitter counts BYTES and a Dart string is
+/// indexed in code units. The two agree for ASCII and disagree for everything
+/// else, so a field carrying one of them without saying which was correct
+/// exactly as long as nobody wrote a non-Latin character. Converted here, at
+/// the boundary where the unit is still known, so that nothing downstream has
+/// to ask which parser produced a block.
 List<Map<String, Object>> _normalizeVisibleNodes(
   List<Map<String, Object>> rawNodes,
+  String source,
 ) {
+  final Utf8CodeUnitIndex index = Utf8CodeUnitIndex(source);
   final List<Map<String, Object>> out = <Map<String, Object>>[];
   for (final Map<String, Object> node in rawNodes) {
     final String type = (node['type'] as String?) ?? 'unknown';
@@ -139,10 +174,26 @@ List<Map<String, Object>> _normalizeVisibleNodes(
       continue;
     }
 
-    out.add(<String, Object>{...node, 'content': content});
+    final Map<String, Object> converted = <String, Object>{...node}
+      ..remove('startByte')
+      ..remove('endByte');
+    out.add(<String, Object>{
+      ...converted,
+      'content': content,
+      // Reads the native key (bytes), writes the converted one (code units).
+      // Two names because they are two different numbers.
+      'startCodeUnit': index.codeUnitFor(_asIntOr0(node['startByte'])),
+      'endCodeUnit': index.codeUnitFor(_asIntOr0(node['endByte'])),
+    });
   }
   return out;
 }
+
+int _asIntOr0(Object? value) => value is int
+    ? value
+    : value is num
+        ? value.toInt()
+        : 0;
 
 String _meaningfulContent(String type, String raw) {
   String content = raw.replaceAll('\r', '').trim();
@@ -273,8 +324,8 @@ Map<String, Object> _renderNodeToMap(MarkdownRenderNode node) {
   return <String, Object>{
     'type': node.type,
     'depth': node.depth,
-    'startByte': node.startByte,
-    'endByte': node.endByte,
+    'startCodeUnit': node.startCodeUnit,
+    'endCodeUnit': node.endCodeUnit,
     'startRow': node.startRow,
     'endRow': node.endRow,
     'raw': node.raw,
