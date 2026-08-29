@@ -139,6 +139,34 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   final List<int> visibleUnits = <int>[];
   final List<int> visibleOffsets = <int>[];
 
+  // A lone CR — one not followed by LF — is a line ending in CommonMark and is
+  // not one to this parser, which splits on LF alone. Everything after it is
+  // therefore being read under a grammar the spec does not agree with: an
+  // unclosed fence swallows the rest of the message and paints it verbatim,
+  // URL included, where a CR-aware reading would have closed the fence.
+  //
+  // The report does not vouch for text it read under the wrong grammar, so the
+  // boundary stops there.
+  //
+  // ⚠️ This was removed in #5 and put back. It used to sit next to a comment
+  // explaining that the analysis and the renderer parsed a CR differently, and
+  // that reason really did go away when the analysis started reading the
+  // renderer's blocks — so the comment read like the whole justification. It
+  // was not: the same two lines were holding up a product contract that says a
+  // half-arrived destination must not be painted at all
+  // (`SMD-W-05 unsupported link grammar stays fail-closed`, twelve fixtures,
+  // this construction is the twelfth). Deleting them put the URL on screen.
+  //
+  // What did NOT come back: truncating the SOURCE before parsing, and carrying
+  // each run's extent alongside the ledger. Those were the two-parser
+  // machinery, and they are still gone — the blocks arrive from the caller now.
+  // Only the boundary is set here; the ledger follows it at the end of the scan
+  // the same way it follows every other reason the boundary moves.
+  // Withholding is the only reason any of this narrows, so with every rule off
+  // nothing does: the screen paints the lot, the report says the same, and the
+  // offsets agree with both.
+  final bool anythingCouldBeWithheld =
+      withholdIncompleteDestinations || suppressRawHtml;
   int safeEnd = source.length;
 
   // Blocks are separated by one newline in the visible text. It comes from no
@@ -228,11 +256,21 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   // is one function, and this calls it rather than owning a second opinion.
   for (final MarkdownRenderNode block
       in projections._collectRenderableBlocks(blocks)) {
-    if (!_slicesBackOut(source, block)) {
+    final int? stopAt =
+        anythingCouldBeWithheld
+            ? _cannotSpeakPast(source, block, sourceComplete: sourceComplete)
+            : null;
+    if (stopAt != null) {
       // Two different answers, with two different requirements.
       //
       // The LEDGER needs to know where each character came from, and for this
       // block nobody does — so it contributes none.
+      //
+      // Clamping the boundary is what makes the CR case hold, and only this
+      // does: cutting the finished ledger by OFFSET lets generated text
+      // through, because a whole generated run reports the ONE position it
+      // started at. `\$\$x\ry\$\$` maps both `x` and `y` to 0, so both sit
+      // before any boundary and both survive the cut.
       //
       // The BOUNDARY is a lower bound on what is safe to paint, and leaving a
       // block out RAISES it. That is the one direction that leaks: an
@@ -250,10 +288,8 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       // (`text/inline.dart:192`), so a caller who turned destination
       // withholding off and left raw-HTML suppression on still has a rule that
       // can fire — and it protects the same kind of secret.
-      final bool anythingCouldBeWithheld =
-          withholdIncompleteDestinations || suppressRawHtml;
-      if (anythingCouldBeWithheld && block.startCodeUnit < safeEnd) {
-        safeEnd = block.startCodeUnit;
+      if (stopAt < safeEnd) {
+        safeEnd = stopAt;
       }
       continue;
     }
@@ -470,36 +506,82 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegionsOfSource(
       hideLinkReferenceDefinitions: hideLinkReferenceDefinitions,
     );
 
-/// Whether this block's text is the source it claims to occupy.
+/// Where the report has to stop for [block], or null if it can speak for it.
 ///
-/// Almost always yes, and the parsers guarantee it — but `_collectRenderableBlocks`
-/// SYNTHESIZES one kind of node: a table the parser only emitted loose rows
-/// for. It trims each row before joining them, so the node spans the original
-/// rows while its text is shorter than they are. The renderer is fine with
-/// that; it only paints the text. This report is coordinates, and a projection
-/// rebased on that node's start puts every cell after the first removed space
-/// at the wrong place — which a consumer then cuts at.
+/// Two ways to lose the right to speak, and they know DIFFERENT amounts, which
+/// is why one predicate returning a bool was wrong.
 ///
-/// Reporting nothing for such a block under-counts by one table. That is the
-/// direction this file already chose everywhere it cannot speak for the screen
-/// (an image's alt text, a footnote with no definition): say less, never say
-/// something wrong. The coordinates being recoverable at all is a change to
-/// how that node is synthesized, which belongs where it is synthesized.
+/// **A lone CR inside the block.** CommonMark calls it a line ending; a parser
+/// that splits on LF alone does not, and everything after it in that block was
+/// read under a grammar the spec disagrees with — an unclosed fence swallows
+/// the rest and paints it verbatim, URL included. This knows EXACTLY where the
+/// trouble starts — and it still cannot stop there. The block is skipped, so
+/// nothing inside it was ever scanned, and putting the boundary at the CR
+/// declares the unscanned part safe: `[x](https://secret.example\rmore` handed
+/// the destination straight to the caller. Both reasons therefore clamp to the
+/// block's start; knowing where the trouble began does not help when the part
+/// before it was never read.
 ///
-/// ⚠️ "Say less" applies to the LEDGER only. Saying less about the BOUNDARY
-/// means claiming MORE is safe to paint, so the caller sees the block instead
-/// of not seeing it — the opposite direction. The caller therefore clamps the
-/// boundary to such a block's start; see the call site.
+/// The cost of that — a block dropped for one frame — is paid where it is
+/// actually caused instead: a `\r` that is the LAST code unit received is not
+/// a lone CR, it is half of a CRLF still arriving, and it only becomes lone
+/// when the source is complete.
 ///
-/// Length, not content: every way a node stops slicing back out — the trim
-/// above, CRLF normalization — makes its text SHORTER, and the exact
-/// comparison is a substring of the whole document per block per parse, on a
-/// streaming path. The exact one runs in debug, on the caller's blocks, at the
-/// top of the scan.
-bool _slicesBackOut(String source, MarkdownRenderNode block) =>
-    block.startCodeUnit >= 0 &&
-    block.endCodeUnit <= source.length &&
-    block.endCodeUnit - block.startCodeUnit == block.raw.length;
+/// Derived from the block, not from the source string, and that is the whole
+/// point: a parser that DOES treat the CR as a line ending ends the block
+/// there, no block spans it, and nothing stops. Scanning the source instead
+/// would have penalised the native backend for something it gets right.
+///
+/// **Coordinates that are not usable.** `_collectRenderableBlocks` synthesizes
+/// one kind of node — a table the parser only emitted loose rows for — and it
+/// trims each row before joining them, so the node spans the original rows
+/// while its text is shorter. The renderer is fine with that; it only paints
+/// the text. This report is coordinates, and a projection rebased on that
+/// node's start puts every cell after the first removed space in the wrong
+/// place. Here nothing about the block is trustworthy, so the boundary can
+/// only go to where it begins.
+///
+/// Either way the block contributes nothing to the LEDGER. Saying less there
+/// is the direction this file takes everywhere it cannot speak for the screen
+/// (an image's alt text, a footnote with no definition). Saying less about the
+/// BOUNDARY is the opposite — it claims MORE is safe — which is why this
+/// returns a position rather than just refusing.
+///
+/// Length, not content, for the coordinate test: every way a node stops
+/// slicing back out makes its text SHORTER, and the exact comparison is a
+/// substring of the whole document per block per parse on a streaming path.
+/// The exact one runs in debug, on the caller's blocks, at the top of the scan.
+int? _cannotSpeakPast(
+  String source,
+  MarkdownRenderNode block, {
+  required bool sourceComplete,
+}) {
+  final bool slicesBackOut = block.startCodeUnit >= 0 &&
+      block.endCodeUnit <= source.length &&
+      block.endCodeUnit - block.startCodeUnit == block.raw.length;
+  if (!slicesBackOut) {
+    return block.startCodeUnit;
+  }
+  for (int i = block.startCodeUnit; i < block.endCodeUnit; i++) {
+    if (source.codeUnitAt(i) != 13) {
+      continue;
+    }
+    if (i + 1 < source.length) {
+      if (source.codeUnitAt(i + 1) != 10) {
+        return block.startCodeUnit;
+      }
+      continue;
+    }
+    // The last code unit received. It is a lone CR only if nothing follows it
+    // ever — mid-stream it is half of a CRLF that has not finished arriving,
+    // and calling it lone blanks the block being typed for exactly one frame.
+    // Same shape as the surrogate half the caller's parser already holds back.
+    if (sourceComplete) {
+      return block.startCodeUnit;
+    }
+  }
+  return null;
+}
 
 /// Whether this block's CONTENT is raw data rather than prose.
 ///

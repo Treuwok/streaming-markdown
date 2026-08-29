@@ -15,7 +15,12 @@
 /// a reader who is not the renderer. Reintroducing the old table bug — a
 /// projection that scans for its own cells — does turn this red.
 ///
-/// Not covered, and deliberately: `suppressRawHtml: false`. That renders raw
+/// Not covered, and deliberately: a source containing a lone CR. The report
+/// stops at it on purpose while the screen paints on, so "report == screen" is
+/// the wrong question there — see `withheld_regions_test.dart`, which asks the
+/// right one (does the boundary hold).
+///
+/// Also not covered, and deliberately: `suppressRawHtml: false`. That renders raw
 /// HTML as a card which paints its own DOM text, and the report omits it — a
 /// known, silent gap documented on `_HtmlCardPlan`. Every caller in this repo
 /// passes `true`, which is what these fixtures use.
@@ -149,17 +154,6 @@ void main() {
     ('an escaped pipe survives in a cell',
         '| a \\| b |\n| --- | --- |\n| c | d |'),
 
-    // ---- a lone CR, which used to stop the scan dead ----
-    // CommonMark calls a lone CR a line ending and the block parser does not,
-    // so the analysis used to refuse to speak past the first one: it ran its
-    // OWN parser, and the two could not be made to agree. It reads the
-    // renderer's blocks now, so there is no second reading to disagree with —
-    // and these say so the only way that settles it, by asking the screen.
-    ('a formula spanning a lone CR', '\$\$x\ry\$\$'),
-    ('a definition id spanning a lone CR', '[^a\rb]: body'),
-    ('an unfinished destination after a lone CR',
-        '```md\ncode\r```\r[help](https://secret.example'),
-
     // ---- ordinary prose, as the control ----
     ('headings and paragraphs', '# Title\n\nsome **bold** prose'),
     ('a paragraph folds its line breaks', 'first line\nsecond line'),
@@ -228,6 +222,34 @@ void main() {
           .visibleText,
       'first second',
     );
+  });
+
+  group('a lone CR stops the report before the screen stops', () {
+    // The one place the report deliberately says LESS than the widget paints,
+    // which is why these are here and not in the sweep above.
+    //
+    // A lone CR is a line ending in CommonMark and is not one to this parser.
+    // Everything after it is read under a grammar the spec does not agree
+    // with — the fence below never closes, so its body is painted verbatim
+    // with the unfinished URL inside it. The report refuses to vouch for that.
+    for (final (String name, String source, String forbidden)
+        in <(String, String, String)>[
+      ('a formula spanning the CR', '\$\$x\ry\$\$', 'y'),
+      ('a definition id spanning the CR', '[^a\rb]: body', 'b'),
+      ('an unfinished destination after the CR',
+          '```md\ncode\r```\r[help](https://secret.example', 'secret'),
+    ]) {
+      test(name, () {
+        final WithheldMarkdownRegions report =
+            analyzeWithheldMarkdownRegionsOfSource(source,
+                suppressRawHtml: true);
+        expect(report.safeEndCodeUnits, lessThanOrEqualTo(source.indexOf('\r')));
+        expect(report.visibleText, isNot(contains(forbidden)));
+        for (final int offset in report.visibleSourceOffsets) {
+          expect(offset, lessThan(report.safeEndCodeUnits));
+        }
+      });
+    }
   });
 
   test('a run that ends before the boundary survives', () {
