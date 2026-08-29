@@ -172,6 +172,22 @@ void main() {
     });
   }
 
+  test('a lone CR stops the ledger, not just the boundary', () {
+    // The two block parsers read a lone CR differently, so the analysis
+    // refuses to guess and stops there. The code block spanning that CR went
+    // on projecting its whole remainder anyway, and the destination after it
+    // reached `visibleText` with offsets 33 past `safeEndCodeUnits`.
+    const String source = '```md\ncode\r```\r[help](https://secret.example';
+    final WithheldMarkdownRegions report =
+        analyzeWithheldMarkdownRegions(source, suppressRawHtml: true);
+
+    expect(report.safeEndCodeUnits, source.indexOf('\r'));
+    expect(report.visibleText, isNot(contains('secret.example')));
+    for (final int offset in report.visibleSourceOffsets) {
+      expect(offset, lessThan(report.safeEndCodeUnits));
+    }
+  });
+
   testWidgets('every reported character still points at itself', (
     tester,
   ) async {
@@ -188,6 +204,16 @@ void main() {
           reason: source);
       for (final int offset in report.visibleSourceOffsets) {
         expect(offset, inInclusiveRange(0, source.length - 1), reason: source);
+      }
+      // Never past the safety boundary. The report answers "how far is it safe
+      // to draw" in one field and "here is the text" in another; a caller that
+      // trusts the second has no way to learn the first was smaller. A lone CR
+      // made them disagree by 34 characters, and the tail it handed over was
+      // an unresolved link destination — the exact thing the boundary exists
+      // to hold back.
+      for (final int offset in report.visibleSourceOffsets) {
+        expect(offset, lessThan(report.safeEndCodeUnits),
+            reason: 'reported text past the boundary in $source');
       }
       // Never backwards. A reveal cursor walks this ledger forward and cannot
       // survive a step back — it would re-hide text it had already shown. The

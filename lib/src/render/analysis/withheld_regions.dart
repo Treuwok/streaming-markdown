@@ -402,11 +402,33 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     }
     clipped.add((range.$1, range.$2 > safeEnd ? safeEnd : range.$2));
   }
+  // The ledger stops where the boundary stops. It is the same report, and one
+  // that says "safe up to here" in one field while handing over text from past
+  // there in another is worse than no boundary at all — the caller that trusts
+  // the text has no way to learn the boundary was smaller.
+  //
+  // Not hypothetical. A lone CR makes the two block parsers disagree, so
+  // `safeEnd` stops at it; the code block spanning that CR went on projecting
+  // its whole remainder, and an unresolved destination after it arrived in
+  // `visibleText` with offsets 33 past the boundary.
+  //
+  // Clipped here, at the one place the report is built, rather than in each
+  // projection — a projection added later cannot get this wrong, because it
+  // does not get to decide it.
+  int ledgerEnd = visibleUnits.length;
+  for (int i = 0; i < visibleOffsets.length; i++) {
+    if (visibleOffsets[i] >= safeEnd) {
+      ledgerEnd = i;
+      break;
+    }
+  }
+
   return WithheldMarkdownRegions(
     safeEndCodeUnits: safeEnd,
     hiddenCodeUnitRanges: List<(int, int)>.unmodifiable(clipped),
-    visibleText: String.fromCharCodes(visibleUnits),
-    visibleSourceOffsets: List<int>.unmodifiable(visibleOffsets),
+    visibleText: String.fromCharCodes(visibleUnits.take(ledgerEnd)),
+    visibleSourceOffsets:
+        List<int>.unmodifiable(visibleOffsets.take(ledgerEnd)),
   );
 }
 
