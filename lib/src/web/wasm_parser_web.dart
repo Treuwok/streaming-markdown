@@ -173,20 +173,39 @@ class StreamingMarkdownWasmParser {
     ]) as js.JsFunction;
   }
 
+  /// Builds a node from the wasm parser's own JSON.
+  ///
+  /// Read field by field rather than through `fromDynamicMap`: this map is the
+  /// wasm build of the same tree-sitter, so it speaks `startByte` and means
+  /// bytes. `fromDynamicMap` refuses that key on purpose — a producer still
+  /// using it has not converted — so handing it this map would throw on every
+  /// web parse. Converted here, then constructed.
   static MarkdownRenderNode _normalizeRenderNode(
     Map<dynamic, dynamic> map,
     Utf8CodeUnitIndex index,
   ) {
-    final MarkdownRenderNode node = MarkdownRenderNode.fromDynamicMap(map);
+    int readInt(String key) {
+      final Object? value = map[key];
+      if (value is int) {
+        return value;
+      }
+      if (value is num) {
+        return value.toInt();
+      }
+      return 0;
+    }
+
+    final String type = (map['type'] as String?) ?? 'unknown';
+    final String raw = (map['raw'] as String?) ?? '';
     return MarkdownRenderNode(
-      type: node.type,
-      depth: node.depth,
-      startCodeUnit: index.codeUnitFor(node.startCodeUnit),
-      endCodeUnit: index.codeUnitFor(node.endCodeUnit),
-      startRow: node.startRow,
-      endRow: node.endRow,
-      raw: node.raw,
-      content: _meaningfulContent(node.type, node.raw),
+      type: type,
+      depth: readInt('depth'),
+      startCodeUnit: index.codeUnitFor(readInt('startByte')),
+      endCodeUnit: index.codeUnitFor(readInt('endByte')),
+      startRow: readInt('startRow'),
+      endRow: readInt('endRow'),
+      raw: raw,
+      content: _meaningfulContent(type, raw),
     );
   }
 

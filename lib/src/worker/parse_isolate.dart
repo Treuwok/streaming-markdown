@@ -7,6 +7,9 @@ void _parseWorkerMain(SendPort mainSendPort) {
   NativeIncrementalMarkdownParser? incremental;
   bool nativeAvailable = false;
   final RopeString fallbackRope = RopeString();
+  // The document the NATIVE parser has accumulated. Its node offsets are
+  // relative to this, not to whichever chunk arrived last.
+  final StringBuffer nativeSource = StringBuffer();
 
   if (isStreamingMarkdownNativeLibraryAvailable) {
     try {
@@ -46,6 +49,17 @@ void _parseWorkerMain(SendPort mainSendPort) {
         if (!ok) {
           throw StateError('Native incremental parse failed');
         }
+        // The native parser accumulates; `text` is only what arrived this
+        // time. Its node offsets are into the WHOLE document, so translating
+        // them needs the whole document — building the index from the chunk
+        // clamps every offset past it and corrupts the ranges for ASCII too.
+        if (op == 'append') {
+          nativeSource.write(text);
+        } else {
+          nativeSource
+            ..clear()
+            ..write(text);
+        }
         mode = op == 'append' ? 'incremental-append' : 'full-set';
       } else {
         if (op == 'append') {
@@ -71,7 +85,8 @@ void _parseWorkerMain(SendPort mainSendPort) {
         blockCount = incremental.blockCount();
         inlineTypeCount = incremental.inlineTypeCount();
         if (includeNodes) {
-          renderNodes = _normalizeVisibleNodes(incremental.blockNodes(), text);
+          renderNodes = _normalizeVisibleNodes(
+              incremental.blockNodes(), nativeSource.toString());
           visibleNodes = renderNodes;
         } else {
           renderNodes = <Map<String, Object>>[];

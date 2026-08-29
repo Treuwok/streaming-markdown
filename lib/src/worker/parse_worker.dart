@@ -318,6 +318,10 @@ class MarkdownSyncParser {
   NativeIncrementalMarkdownParser? _native;
   bool _nativeAvailable = false;
   final RopeString _fallbackRope = RopeString();
+  /// The document the NATIVE parser has accumulated, for translating its
+  /// byte offsets. Not the same thing as [_fallbackRope], which only fills
+  /// when there is no native parser.
+  final StringBuffer _nativeSource = StringBuffer();
 
   /// Parses a complete markdown string without keeping parser state.
   static StreamingMarkdownParseResult parseMarkdown(
@@ -386,6 +390,15 @@ class MarkdownSyncParser {
       if (!ok) {
         throw StateError('Native incremental parse failed');
       }
+      // Same reason as the isolate: the native parser accumulates, so its node
+      // offsets are into the whole document while `text` is only this chunk.
+      if (op == 'append') {
+        _nativeSource.write(text);
+      } else {
+        _nativeSource
+          ..clear()
+          ..write(text);
+      }
       mode = op == 'append' ? 'sync-incremental-append' : 'sync-full-set';
     } else {
       if (op == 'append') {
@@ -414,7 +427,8 @@ class MarkdownSyncParser {
       blockCount = native.blockCount();
       inlineTypeCount = native.inlineTypeCount();
       renderNodes = includeNodes
-          ? _nodesFromMaps(_normalizeVisibleNodes(native.blockNodes(), text))
+          ? _nodesFromMaps(
+              _normalizeVisibleNodes(native.blockNodes(), _nativeSource.toString()))
           : const <MarkdownRenderNode>[];
     } else {
       final MarkdownDocument document =
@@ -449,6 +463,7 @@ class MarkdownSyncParser {
     _native = null;
     _nativeAvailable = false;
     _fallbackRope.clear();
+    _nativeSource.clear();
   }
 
   static List<MarkdownRenderNode> _nodesFromMaps(

@@ -97,22 +97,30 @@ void main() {
     });
   });
 
-  test('the offsets stay ordered and inside one another', () {
-    // Ordering and containment are what the render pipeline uses these for.
-    // They survive a wrong unit as long as it is wrong CONSISTENTLY, which is
-    // why the pipeline never noticed — worth pinning so a future change that
-    // converts only some producers shows up here rather than in a cursor.
+  test('the offsets advance through the source and never invert', () {
+    // Ordering is what the render pipeline uses these for, and it survives a
+    // wrong unit as long as the unit is wrong CONSISTENTLY — which is why the
+    // pipeline never noticed. Worth pinning so a change that converts only
+    // some producers shows up here rather than in a cursor.
+    //
+    // Starts only, not "each start follows the previous end": the native
+    // parser returns a depth-first flattened TREE, so a `list` is followed by
+    // the `list_item`s inside it, whose starts are legitimately before the
+    // container's end. Asserting non-overlap would fail on the one backend
+    // this test exists to check.
     const String source = '# 標題\n\n段落一\n\n- 甲\n- 乙\n\n段落二';
     final List<MarkdownRenderNode> blocks =
         MarkdownSyncParser.parseMarkdown(source).blocks;
 
-    int previousEnd = 0;
+    int previousStart = 0;
     for (final MarkdownRenderNode block in blocks) {
-      expect(block.startCodeUnit, greaterThanOrEqualTo(previousEnd),
-          reason: '${block.type} starts after the block before it');
-      expect(block.endCodeUnit, greaterThanOrEqualTo(block.startCodeUnit));
-      previousEnd = block.endCodeUnit;
+      expect(block.startCodeUnit, greaterThanOrEqualTo(previousStart),
+          reason: '${block.type} starts no earlier than the block before it');
+      expect(block.endCodeUnit, greaterThanOrEqualTo(block.startCodeUnit),
+          reason: '${block.type} does not end before it starts');
+      expect(block.endCodeUnit, lessThanOrEqualTo(source.length),
+          reason: '${block.type} stays inside the source');
+      previousStart = block.startCodeUnit;
     }
-    expect(previousEnd, lessThanOrEqualTo(source.length));
   });
 }
