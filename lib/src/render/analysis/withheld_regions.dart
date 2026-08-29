@@ -52,12 +52,20 @@ final class WithheldMarkdownRegions {
 
 /// Report which parts of [source] a renderer would refuse to draw.
 ///
-/// Takes the source and nothing else on purpose. The block offsets carried by
-/// [MarkdownRenderNode] are named `startByte` but hold UTF-16 code-unit
-/// indices on the pure-Dart path and real byte offsets on the native one, so
-/// accepting caller-supplied blocks would make the unit of the returned
-/// coordinates depend on which parser the caller happened to use. Everything
-/// here is measured in one unit against one string.
+/// Takes the SAME [blocks] handed to [AnimatedStreamingMarkdown], because the
+/// question is about that rendering and no other.
+///
+/// Deriving the blocks here from the source was the previous shape, and it
+/// made this a second answer to "how does this document split into blocks":
+/// one that ran the pure-Dart parser while a device runs the native one,
+/// walked top-level nodes while the renderer walks a flattened tree, and read
+/// a lone CR differently from whichever parser produced what was on screen.
+/// Six rounds of review landed in this one file, each on a different
+/// consequence of that one thing. There is nothing to derive now.
+///
+/// [source] is the string those blocks were parsed from — the coordinate space
+/// the whole report is expressed in. Handing over a different string is the
+/// one new way to get this wrong, so a debug assertion checks the pair.
 ///
 /// [hideLinkReferenceDefinitions] says the caller suppresses the DRAWING of
 /// those blocks while still handing them to the renderer — what the mobile
@@ -76,31 +84,18 @@ final class WithheldMarkdownRegions {
 /// configured with, or the two answers describe different renderings, and
 /// nothing observes the difference.
 ///
-/// ## What this describes, exactly
+/// ## The one thing it still cannot see
 ///
-/// It describes what the DEFAULT rendering of [source] paints. That is less
-/// than "what your widget paints", in two ways that no flag can close, because
-/// this takes a string and the view takes blocks:
-///
-///  * **A `blockBuilder` that replaces text.** The builder can return any
-///    widget for any block; this cannot see it. A builder that only wraps or
-///    decorates the default widget is fine, and so is one that adds chrome —
-///    a typing cursor is not part of the answer's text. A builder that HIDES a
-///    block or paints different words makes this report wrong for that block,
-///    and the caller has to tell it so. [hideLinkReferenceDefinitions] is that
-///    channel for the one case in this repo; there is no general one.
-///  * **Definitions nested inside a container.** This walks the top-level
-///    blocks of its own parse. A footnote definition inside a quote —
-///    `> [^a]: body` — is not found here, while a renderer handed flattened
-///    nodes from the native parser does find it and numbers the reference from
-///    it. The reference then paints `1` and this reports `a`.
-///
-/// Both are the same shape and have the same real fix: be HANDED the blocks
-/// and the builder the renderer got, rather than re-deriving a document from
-/// the source. That is a bigger change than this scan, and it is written down
-/// rather than half-done here.
+/// A `blockBuilder` that replaces text. The builder can return any widget for
+/// any block, and it is not passed here. One that wraps or decorates the
+/// default widget is fine, and so is one that adds chrome — a typing cursor is
+/// not part of the answer's text. One that HIDES a block or paints different
+/// words makes this report wrong for that block, and the caller has to say so.
+/// [hideLinkReferenceDefinitions] is that channel for the one case in this
+/// repo; there is no general one.
 WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   String source, {
+  required List<MarkdownRenderNode> blocks,
   bool withholdIncompleteDestinations = true,
   bool suppressRawHtml = true,
   bool sourceComplete = false,
@@ -115,75 +110,36 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       visibleSourceOffsets: <int>[],
     );
   }
+  assert(
+    blocks.every((MarkdownRenderNode node) =>
+        node.startCodeUnit >= 0 &&
+        node.endCodeUnit <= source.length &&
+        node.startCodeUnit <= node.endCodeUnit &&
+        source.substring(node.startCodeUnit, node.endCodeUnit) == node.raw),
+    'blocks must be the parse of this exact source',
+  );
 
-  // A lone CR is a line ending in CommonMark and is not one to the block
-  // parser, which splits on LF alone. Rewriting it to `\n` before parsing was
-  // tried and is worse: the analysis then splits blocks differently from
-  // whichever parser produced the blocks being rendered, so a reported range
-  // can point at text that IS on screen — and the caller excises it, which
-  // desynchronises everything downstream that counts characters.
-  //
-  // There is no reading of a lone CR that both parsers agree on, so the
-  // analysis stops at the first one instead of guessing. It over-hides the
-  // remainder of such a message; a lone CR does not occur in the content this
-  // is built for, and over-hiding is the direction that cannot leak.
-  final int loneCarriageReturn = _firstLoneCarriageReturn(source);
-  // Parse only as far as the analysis is willing to speak for.
-  //
-  // The boundary is known BEFORE parsing, and parsing past it bought nothing
-  // but trouble: a block spanning the CR went on projecting its whole
-  // remainder, and clipping the result afterwards needed the run's source
-  // extent — which generated text does not have, because it reports one
-  // position for its whole run. Two rounds of review went into carrying that
-  // extent alongside the ledger, and it grew a tax each time: keeping it in
-  // step with edge-trimming, then needing a finer granularity than the piece.
-  //
-  // Truncating removes the question. Nothing downstream can produce text from
-  // past the boundary, because it never sees any.
-  final String analyzed = loneCarriageReturn == -1
-      ? source
-      : source.substring(0, loneCarriageReturn);
-  final RopeString rope = RopeString()..append(analyzed);
-  final MarkdownDocument document = const RopeMarkdownParser().parse(rope);
+  final StreamingMarkdownRenderView projections =
+      _projectionsView(suppressRawHtml: suppressRawHtml);
 
   // Definitions first: a reference link whose definition has not arrived is an
   // unresolved destination, and that is decided by the whole document, not by
   // the block the reference sits in.
-  final StreamingMarkdownRenderView projections =
-      _projectionsView(suppressRawHtml: suppressRawHtml);
-
-  // Same numbering the renderer assigns: definitions in document order. It is
-  // derivable here after all — the earlier note that this scan cannot know it
-  // was wrong, and a footnote reference paints a character either way (the
-  // number, or the id when there is no definition).
-  final Map<String, int> footnoteNumbers = <String, int>{};
-  for (final MarkdownBlockNode block in document.blocks) {
-    for (final _FootnoteDefinition definition in projections
-        ._parseFootnoteDefinitions(source.substring(block.start, block.end))) {
-      final String key = _normalizeFootnoteKey(definition.id);
-      if (key.isEmpty || footnoteNumbers.containsKey(key)) {
-        continue;
-      }
-      footnoteNumbers[key] = footnoteNumbers.length + 1;
-    }
-  }
-
-  final Map<String, String> references = <String, String>{};
-  for (final MarkdownBlockNode block in document.blocks) {
-    if (block is GenericBlockNode &&
-        block.type == 'link_reference_definition') {
-      _addLinkReferencesFromRaw(
-        source.substring(block.start, block.end),
-        references,
-      );
-    }
-  }
+  //
+  // Both scans are the renderer's own, over the renderer's own nodes. They
+  // used to be hand-written here over a locally parsed document, which is how
+  // a footnote definition inside a quote came to be numbered by the renderer
+  // and not by this: the renderer reads every node, this read the top level.
+  final Map<String, int> footnoteNumbers =
+      projections._extractFootnoteNumbers(blocks);
+  final Map<String, String> references =
+      projections._extractLinkReferences(blocks);
 
   final List<(int, int)> hidden = <(int, int)>[];
   final List<int> visibleUnits = <int>[];
   final List<int> visibleOffsets = <int>[];
 
-  int safeEnd = loneCarriageReturn == -1 ? source.length : loneCarriageReturn;
+  int safeEnd = source.length;
 
   // Blocks are separated by one newline in the visible text. It comes from no
   // single source character, so it reports the end of the block it follows —
@@ -267,19 +223,24 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     }
   }
 
-  for (final MarkdownBlockNode block in document.blocks) {
-    final String blockRaw = analyzed.substring(block.start, block.end);
+  // Which of the parser's nodes become blocks on screen is the renderer's
+  // decision — flattened tree, container children, orphan table fragments. It
+  // is one function, and this calls it rather than owning a second opinion.
+  for (final MarkdownRenderNode block
+      in projections._collectRenderableBlocks(blocks)) {
+    if (!_slicesBackOut(source, block)) {
+      continue;
+    }
 
     if (hideLinkReferenceDefinitions &&
-        block is GenericBlockNode &&
         block.type == 'link_reference_definition') {
       continue;
     }
 
-    if (suppressRawHtml && _isRawTextHtmlBlock(block, source)) {
+    if (suppressRawHtml && _isRawTextHtmlBlock(block)) {
       // Nothing inside these is prose, so the block parser's extent IS the
       // hidden range — no second scan for where the element ends.
-      hidden.add((block.start, block.end));
+      hidden.add((block.startCodeUnit, block.endCodeUnit));
       continue;
     }
 
@@ -299,12 +260,10 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
     // slice. Scanning the raw slice was why headings kept their `#`, quotes
     // kept their `>` and paragraphs kept hard line breaks the screen folds
     // into spaces: the analysis was answering about a different string.
-    final _BlockProjection projection =
-        projections
-            ._planBlock(_renderNodeFor(blockRaw, block.type))
-            .projection;
+    final _BlockProjection projection = projections._planBlock(block).projection;
     for (final _ProjectedPiece projected in projection.pieces) {
-      final _SourceSlice inline = _rebase(projected.slice, block.start);
+      final _SourceSlice inline =
+          _rebase(projected.slice, block.startCodeUnit);
       void beginPiece() {
         if (!projected.continuesLine) {
           separateBlocks();
@@ -397,7 +356,9 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
         // The piece's own start, not the block's: a list whose SECOND item
         // holds the unfinished destination must not discard the first.
         final int boundary = withheldFrom == 0
-            ? (inline.offsets.isEmpty ? block.start : inline.offsets.first)
+            ? (inline.offsets.isEmpty
+                ? block.startCodeUnit
+                : inline.offsets.first)
             : sourceAt(withheldFrom - 1) + 1;
         if (boundary < safeEnd) {
           safeEnd = boundary;
@@ -423,10 +384,10 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   // there in another is worse than no boundary at all — the caller that trusts
   // the text has no way to learn the boundary was smaller.
   //
-  // Not hypothetical. A lone CR makes the two block parsers disagree, so
-  // `safeEnd` stops at it; the code block spanning that CR went on projecting
-  // its whole remainder, and an unresolved destination after it arrived in
-  // `visibleText` with offsets 33 past the boundary.
+  // Not hypothetical. A block can span the boundary — the boundary is set by
+  // an unfinished destination inside one piece, and the other pieces of that
+  // block go on projecting — so text from past it reached `visibleText` with
+  // offsets 33 beyond `safeEndCodeUnits`.
   //
   // Clipped here, at the one place the report is built, rather than in each
   // projection — a projection added later cannot get this wrong, because it
@@ -448,16 +409,66 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   );
 }
 
-/// Index of the first CR that is not part of a CRLF, or -1.
-int _firstLoneCarriageReturn(String source) {
-  for (int i = 0; i < source.length; i++) {
-    if (source.codeUnitAt(i) == 13 &&
-        (i + 1 >= source.length || source.codeUnitAt(i + 1) != 10)) {
-      return i;
-    }
-  }
-  return -1;
-}
+/// The same report for a caller that holds only the source.
+///
+/// Parses with [MarkdownSyncParser] — the parser
+/// `AnimatedStreamingMarkdown.fromMarkdown` uses to turn a string into the
+/// blocks it renders — so this reaches the answer by the renderer's own route
+/// rather than a parallel one.
+///
+/// Prefer the form above wherever the blocks are already in hand: one parse
+/// instead of two, and the blocks that are actually on the screen rather than
+/// a list that ought to equal them.
+WithheldMarkdownRegions analyzeWithheldMarkdownRegionsOfSource(
+  String source, {
+  // The same default `AnimatedStreamingMarkdown.fromMarkdown` uses, and for
+  // the same reason it exists: this is that constructor's counterpart, so a
+  // caller who takes both string-only entry points gets one parser. `auto`
+  // here would let this run native while the widget beside it runs Dart —
+  // which is the divergence the whole change removes, reintroduced in a
+  // default value.
+  MarkdownSyncParserBackend backend = MarkdownSyncParserBackend.dart,
+  bool withholdIncompleteDestinations = true,
+  bool suppressRawHtml = true,
+  bool sourceComplete = false,
+  bool allowUnclosedInlineDelimiters = false,
+  bool hideLinkReferenceDefinitions = false,
+}) =>
+    analyzeWithheldMarkdownRegions(
+      source,
+      blocks: MarkdownSyncParser.parseMarkdown(source, backend: backend).blocks,
+      withholdIncompleteDestinations: withholdIncompleteDestinations,
+      suppressRawHtml: suppressRawHtml,
+      sourceComplete: sourceComplete,
+      allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
+      hideLinkReferenceDefinitions: hideLinkReferenceDefinitions,
+    );
+
+/// Whether this block's text is the source it claims to occupy.
+///
+/// Almost always yes, and the parsers guarantee it — but `_collectRenderableBlocks`
+/// SYNTHESIZES one kind of node: a table the parser only emitted loose rows
+/// for. It trims each row before joining them, so the node spans the original
+/// rows while its text is shorter than they are. The renderer is fine with
+/// that; it only paints the text. This report is coordinates, and a projection
+/// rebased on that node's start puts every cell after the first removed space
+/// at the wrong place — which a consumer then cuts at.
+///
+/// Reporting nothing for such a block under-counts by one table. That is the
+/// direction this file already chose everywhere it cannot speak for the screen
+/// (an image's alt text, a footnote with no definition): say less, never say
+/// something wrong. The coordinates being recoverable at all is a change to
+/// how that node is synthesized, which belongs where it is synthesized.
+///
+/// Length, not content: every way a node stops slicing back out — the trim
+/// above, CRLF normalization — makes its text SHORTER, and the exact
+/// comparison is a substring of the whole document per block per parse, on a
+/// streaming path. The exact one runs in debug, on the caller's blocks, at the
+/// top of the scan.
+bool _slicesBackOut(String source, MarkdownRenderNode block) =>
+    block.startCodeUnit >= 0 &&
+    block.endCodeUnit <= source.length &&
+    block.endCodeUnit - block.startCodeUnit == block.raw.length;
 
 /// Whether this block's CONTENT is raw data rather than prose.
 ///
@@ -470,12 +481,8 @@ int _firstLoneCarriageReturn(String source) {
 /// that produced this node, and re-deriving it here was a hand-written second
 /// answer that disagreed with the first (an unclosed `<script>` at end of
 /// input is the case that separates them).
-bool _isRawTextHtmlBlock(MarkdownBlockNode block, String source) {
-  if (block is! GenericBlockNode || block.type != 'html_block') {
-    return false;
-  }
-  return _isRawTextHtmlOpening(source.substring(block.start, block.end));
-}
+bool _isRawTextHtmlBlock(MarkdownRenderNode block) =>
+    block.type == 'html_block' && _isRawTextHtmlOpening(block.raw);
 
 /// The same test on a block's raw text, for the two render-side callers.
 bool _isRawTextHtmlOpening(String raw) {
@@ -531,19 +538,6 @@ StreamingMarkdownRenderView _projectionsView({required bool suppressRawHtml}) =>
       // view has to be configured the way the caller configured the renderer.
       suppressRawHtml: suppressRawHtml,
     );
-
-MarkdownRenderNode _renderNodeFor(String raw, String type) =>
-    MarkdownRenderNode(
-      type: type,
-      depth: 0,
-      startCodeUnit: 0,
-      endCodeUnit: raw.length,
-      startRow: 0,
-      endRow: 0,
-      raw: raw,
-      content: raw,
-    );
-
 
 /// The projection is computed against the block's own slice, so its offsets
 /// start at zero. Shift them to where the block sits in the document.

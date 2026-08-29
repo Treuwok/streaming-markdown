@@ -69,7 +69,7 @@ void main() {
     test('reports the boundary at the opener of an unresolved link', () {
       const String source = 'Before [help](https://secret.example';
       final WithheldMarkdownRegions regions =
-          analyzeWithheldMarkdownRegions(source);
+          analyzeWithheldMarkdownRegionsOfSource(source);
       expect(regions.safeEndCodeUnits, source.indexOf('['),
           reason: 'the whole candidate is held back from its opener, so a '
               'later `](` cannot retract an already-painted label');
@@ -78,7 +78,7 @@ void main() {
     test('reports nothing for a source with no unresolved destination', () {
       const String source = 'Before [help](https://ok.example) after';
       final WithheldMarkdownRegions regions =
-          analyzeWithheldMarkdownRegions(source);
+          analyzeWithheldMarkdownRegionsOfSource(source);
       expect(regions.safeEndCodeUnits, source.length);
       expect(regions.hiddenCodeUnitRanges, isEmpty);
     });
@@ -90,7 +90,7 @@ void main() {
       const String prefix = '先看這裡 ';
       const String source = '$prefix[help](https://secret.example';
       final WithheldMarkdownRegions regions =
-          analyzeWithheldMarkdownRegions(source);
+          analyzeWithheldMarkdownRegionsOfSource(source);
       expect(regions.safeEndCodeUnits, prefix.length);
       expect(source.substring(0, regions.safeEndCodeUnits), prefix);
     });
@@ -102,7 +102,7 @@ void main() {
       const String source =
           'first\n\nsecond a <a href="https://x.example">b</a> c';
       final WithheldMarkdownRegions regions =
-          analyzeWithheldMarkdownRegions(source);
+          analyzeWithheldMarkdownRegionsOfSource(source);
       expect(regions.safeEndCodeUnits, source.length,
           reason: 'a closed tag does not stop the stream; it just paints '
               'nothing');
@@ -112,19 +112,61 @@ void main() {
       expect(hiddenText, <String>['<a href="https://x.example">', '</a>']);
     });
 
-    test('the analysis stops at a lone CR rather than guess a block split', () {
-      // The block parser splits on LF alone, so this fence never closes for
-      // it and swallows the link — while a parser that honours CR ends the
-      // fence and renders the link. There is no reading both agree on, so the
-      // analysis stops at the CR. Without that, the destination below is
-      // inside code content as far as this scan can tell, and reaches paint.
+    test('a table the renderer synthesizes is not given coordinates', () {
+      // The renderer builds one kind of node that does not slice back out of
+      // the source: a table the parser only emitted loose rows for. It trims
+      // each row before joining them, so the node still spans the original
+      // rows while its text is shorter — and a projection rebased on its start
+      // puts every cell after the first removed space at the wrong offset.
+      //
+      // The rows below are what the NATIVE parser emits for this input; the
+      // pure-Dart parser gives a whole `pipe_table` and never reaches the
+      // synthesis. That is why this feeds the nodes directly: the shape only
+      // occurs on the backend a host test cannot run.
+      const String source = '  a | b  \n  c | d  ';
+      MarkdownRenderNode row(int start, int end, int line) =>
+          MarkdownRenderNode(
+            type: 'pipe_table_row',
+            depth: 0,
+            startCodeUnit: start,
+            endCodeUnit: end,
+            startRow: line,
+            endRow: line,
+            raw: source.substring(start, end),
+            content: source.substring(start, end),
+          );
+
+      final WithheldMarkdownRegions regions = analyzeWithheldMarkdownRegions(
+        source,
+        blocks: <MarkdownRenderNode>[row(0, 9, 0), row(10, 19, 1)],
+        suppressRawHtml: true,
+        sourceComplete: true,
+      );
+
+      // Nothing, rather than cells at coordinates that are off by the spaces
+      // the synthesis removed. Saying less is the direction this report takes
+      // everywhere it cannot speak for the screen.
+      expect(regions.visibleText, isEmpty);
+      expect(regions.visibleSourceOffsets, isEmpty);
+    });
+
+    test('a lone CR no longer stops the scan', () {
+      // It used to. CommonMark calls a lone CR a line ending and the block
+      // parser does not, so a fence closes for one reading and not the other —
+      // and the analysis, running its own parser, could not tell which one was
+      // on screen. It stopped at the CR and over-hid the rest.
+      //
+      // There is one reading now. This fence never closes, so everything after
+      // it is code content, and code is painted verbatim — including the
+      // unfinished destination, which is text on the screen rather than a link
+      // anyone can follow. That the report says the same is checked against
+      // the widget itself in `painted_text_matches_projection_test.dart`; this
+      // pins the boundary, which is what the caller truncates by.
       const String source =
           '```md\ncode\r```\r[help](https://secret.example';
       final WithheldMarkdownRegions regions =
-          analyzeWithheldMarkdownRegions(source);
-      expect(regions.safeEndCodeUnits, source.indexOf('\r'));
-      expect(source.substring(0, regions.safeEndCodeUnits),
-          isNot(contains('secret.example')));
+          analyzeWithheldMarkdownRegionsOfSource(source);
+      expect(regions.safeEndCodeUnits, source.length);
     });
 
     test('a newline never releases a destination mid-stream', () {
@@ -138,7 +180,7 @@ void main() {
         '- see [help\n  ](https://secret.example',
       ]) {
         final WithheldMarkdownRegions regions =
-            analyzeWithheldMarkdownRegions(source);
+            analyzeWithheldMarkdownRegionsOfSource(source);
         expect(source.substring(0, regions.safeEndCodeUnits),
             isNot(contains('secret.example')),
             reason: source);
@@ -154,7 +196,7 @@ void main() {
       // reason and the guard would look present while doing nothing.
       const String source = '~~~\ntext <a href="https://shown.example\n~~~';
       final WithheldMarkdownRegions regions =
-          analyzeWithheldMarkdownRegions(source);
+          analyzeWithheldMarkdownRegionsOfSource(source);
       expect(regions.safeEndCodeUnits, source.length);
       expect(regions.hiddenCodeUnitRanges, isEmpty);
     });
@@ -167,16 +209,16 @@ void main() {
       // showing it correct.
       const String prose = 'see [not a link';
       expect(
-        analyzeWithheldMarkdownRegions(prose, sourceComplete: true)
+        analyzeWithheldMarkdownRegionsOfSource(prose, sourceComplete: true)
             .safeEndCodeUnits,
         prose.length,
       );
-      expect(analyzeWithheldMarkdownRegions(prose).safeEndCodeUnits,
+      expect(analyzeWithheldMarkdownRegionsOfSource(prose).safeEndCodeUnits,
           prose.indexOf('['));
 
       const String truncated = 'see [x](https://secret.example';
       expect(
-        analyzeWithheldMarkdownRegions(truncated, sourceComplete: true)
+        analyzeWithheldMarkdownRegionsOfSource(truncated, sourceComplete: true)
             .safeEndCodeUnits,
         truncated.indexOf('['),
       );
@@ -185,7 +227,7 @@ void main() {
     test('resolves a reference link against a definition anywhere in source',
         () {
       const String resolved = 'see [help][ref]\n\n[ref]: https://ok.example';
-      expect(analyzeWithheldMarkdownRegions(resolved).safeEndCodeUnits,
+      expect(analyzeWithheldMarkdownRegionsOfSource(resolved).safeEndCodeUnits,
           resolved.length);
 
       // A closed reference form carries no destination — the URL lives in the
@@ -193,11 +235,11 @@ void main() {
       // arriving later upgrades it. Only an OPEN candidate is held back, where
       // a late `](` would retract a label that was already painted.
       const String unresolved = 'see [help][ref]';
-      expect(analyzeWithheldMarkdownRegions(unresolved).safeEndCodeUnits,
+      expect(analyzeWithheldMarkdownRegionsOfSource(unresolved).safeEndCodeUnits,
           unresolved.length);
 
       const String open = 'see [help';
-      expect(analyzeWithheldMarkdownRegions(open).safeEndCodeUnits,
+      expect(analyzeWithheldMarkdownRegionsOfSource(open).safeEndCodeUnits,
           open.indexOf('['));
     });
   });
@@ -212,7 +254,7 @@ void main() {
 
     test('hides every tag in it, and only the tags', () {
       final WithheldMarkdownRegions regions =
-          analyzeWithheldMarkdownRegions(source);
+          analyzeWithheldMarkdownRegionsOfSource(source);
       final StringBuffer hidden = StringBuffer();
       for (final (int start, int end) range in regions.hiddenCodeUnitRanges) {
         hidden.write(source.substring(range.$1, range.$2));
@@ -256,7 +298,7 @@ void main() {
       testWidgets('nothing the analysis withheld reaches paint: $source',
           (tester) async {
         final WithheldMarkdownRegions regions =
-            analyzeWithheldMarkdownRegions(source);
+            analyzeWithheldMarkdownRegionsOfSource(source);
         await tester.pumpWidget(_host(source));
         await tester.pump();
         final String painted = _painted(tester);
