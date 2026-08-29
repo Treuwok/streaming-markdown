@@ -59,7 +59,13 @@ final class WithheldMarkdownRegions {
 /// coordinates depend on which parser the caller happened to use. Everything
 /// here is measured in one unit against one string.
 ///
-/// Every flag here means exactly what it means on
+/// [hideLinkReferenceDefinitions] is for callers that drop those blocks before
+/// handing them to the renderer, as the mobile adapter does. The block IS
+/// painted by the default renderer, so the analysis cannot decide this on its
+/// own — a caller that removes it and does not say so gets a report describing
+/// text that is not on its screen.
+///
+/// Every other flag here means exactly what it means on
 /// [StreamingMarkdownRenderView] — including
 /// [allowUnclosedInlineDelimiters], which changes where emphasis ends and so
 /// changes where a nested scan reports from. Pass the same values the view is
@@ -71,6 +77,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   bool suppressRawHtml = true,
   bool sourceComplete = false,
   bool allowUnclosedInlineDelimiters = false,
+  bool hideLinkReferenceDefinitions = false,
 }) {
   if (source.isEmpty) {
     return const WithheldMarkdownRegions(
@@ -181,6 +188,12 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   for (final MarkdownBlockNode block in document.blocks) {
     final String blockRaw = source.substring(block.start, block.end);
 
+    if (hideLinkReferenceDefinitions &&
+        block is GenericBlockNode &&
+        block.type == 'link_reference_definition') {
+      continue;
+    }
+
     if (_blockHasNoInlineContent(block)) {
       // Not inline-parsed, but a code block is still text on the screen, and
       // anything counting painted characters has to count those too. It comes
@@ -236,7 +249,7 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
 
     separateBlocks();
     for (final _InlineToken token in result.tokens) {
-      final String painted = token.isImage ? token.altText : token.text;
+      final String painted = _paintedTextOf(token);
       if (painted.isEmpty) {
         continue;
       }
@@ -330,6 +343,25 @@ bool _isRawTextHtmlOpening(String raw) {
   return false;
 }
 
+/// What this token puts on the screen.
+///
+/// An image shows its alt text and a LaTeX span shows its expression rendered,
+/// so both contribute characters even though neither is a slice of the source.
+///
+/// A footnote REFERENCE deliberately contributes none: what it paints is a
+/// number, and the numbering is assigned by the renderer from the whole
+/// document, not by this scan. Reporting the marker's source instead would put
+/// `[^note]` on a ledger of what a reader sees.
+String _paintedTextOf(_InlineToken token) {
+  if (token.isImage) {
+    return token.altText;
+  }
+  if (token.isLatex) {
+    return token.latexExpression ?? '';
+  }
+  return token.text;
+}
+
 String _blockTypeOf(MarkdownBlockNode block) {
   if (block is CodeFenceNode) {
     return 'fenced_code_block';
@@ -379,11 +411,9 @@ bool _blockHasNoInlineContent(MarkdownBlockNode block) {
   }
   return block is GenericBlockNode &&
       (block.type == 'indented_code_block' ||
-          block.type == 'front_matter' ||
           // Paints a rule and a nothing respectively — no text either way, so
           // treating their source as inline content credited `***` and a
           // table's `|---|` as characters a reader could see.
           block.type == 'thematic_break' ||
-          block.type == 'pipe_table_delimiter_row' ||
-          block.type == 'link_reference_definition');
+          block.type == 'pipe_table_delimiter_row');
 }

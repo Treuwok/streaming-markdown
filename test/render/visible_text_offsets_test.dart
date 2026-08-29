@@ -112,7 +112,6 @@ void main() {
     for (final String source in const <String>[
       '***',
       '---',
-      '[ref]: https://example.test',
     ]) {
       test(source, () => expect(_scan(source).visibleText, isEmpty));
     }
@@ -142,5 +141,26 @@ void main() {
     // characters, so it must not contribute a gap either. Two separators for
     // one gap shifted every offset after it.
     expect(_scan('first\n\n<div></div>\n\nlast').visibleText, 'first\nlast');
+  });
+
+  test('a definition block is painted, so it contributes its text', () {
+    // The renderer draws link-reference and footnote definitions through its
+    // definition-block path, so they are not textless. Skipping them made the
+    // report claim an empty screen for a message that has text on it.
+    expect(_scan('[ref]: https://example.test').visibleText, isNotEmpty);
+  });
+
+  test('a caller that drops definition blocks can say so', () {
+    // The default renderer paints them, so the analysis cannot decide this on
+    // its own. A caller that removes the block and stays quiet gets a report
+    // describing text that is not on its screen.
+    expect(
+      analyzeWithheldMarkdownRegions(
+        '[ref]: https://example.test',
+        sourceComplete: true,
+        hideLinkReferenceDefinitions: true,
+      ).visibleText,
+      isEmpty,
+    );
   });
 }

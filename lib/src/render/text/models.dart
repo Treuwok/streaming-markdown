@@ -256,9 +256,10 @@ class _InlineToken {
   /// Whether [text] is a verbatim slice of the source at [visibleSourceStart].
   ///
   /// True for ordinary text runs, so character `k` of [text] came from source
-  /// offset `visibleSourceStart + k`. False where the visible text is not in
-  /// the source at all — an image's alt text, a footnote marker, rendered
-  /// LaTeX — and every character of those maps to the construct's start.
+  /// offset `visibleSourceStart + k`. False where what is painted is not a
+  /// slice of the source — an image's alt text, a footnote's assigned number,
+  /// a rendered formula — and every character of those maps to the
+  /// construct's start.
   bool get isVerbatimSlice => !isImage && !isFootnoteReference && !isLatex;
 
   bool get isImage => imageUrl != null;
