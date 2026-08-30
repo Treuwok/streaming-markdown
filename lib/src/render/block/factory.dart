@@ -148,7 +148,7 @@ extension _StreamingMarkdownBlockFactory on StreamingMarkdownRenderView {
   }
 
   _BlockPlan _planTableBlock(MarkdownRenderNode node) {
-    final _SourceSlice normalized = _normalizedSlice(node.raw, 0);
+    final _SourceSlice normalized = _blockSlice(node);
     final _ParsedTable? parsed = _parseMarkdownTable(
       normalized,
       allowLooseWithoutDelimiter: true,
