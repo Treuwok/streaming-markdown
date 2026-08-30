@@ -351,10 +351,35 @@ _AngleScan _scanAngleAt(
     return const _AngleScan(_AngleScanKind.notAngleSyntax);
   }
 
-  if (text.startsWith('<!--', start)) {
-    final int end = text.indexOf('-->', start + 4);
+  // The spec's HTML-tag grammar is a closed set of six — open tag, closing
+  // tag, comment, processing instruction, declaration, CDATA section — and
+  // three of them begin with something other than a letter. This scanner knew
+  // only the comment, so `<!DOCTYPE html>` and `<?php echo 1; ?>` were painted
+  // verbatim WITH the flag on, which is worse than rendering them (#2366).
+  //
+  // Three of the four are literal-delimited: a fixed opener, a fixed closer,
+  // no nesting and no escapes. They are handled together and ahead of the tag
+  // scanner because that scanner's only real job — deciding whether what
+  // follows a name is an attribute list — has no counterpart in any of them.
+  final _DelimitedHtml? delimited = _delimitedHtmlAt(text, start);
+  if (delimited != null) {
+    final int end =
+        text.indexOf(delimited.closer, start + delimited.opener.length);
     if (end != -1) {
-      return _AngleScan(_AngleScanKind.html, end + 3);
+      return _AngleScan(_AngleScanKind.html, end + delimited.closer.length);
+    }
+    return _unterminatedAngle(text, start, sourceComplete: sourceComplete);
+  }
+
+  // The declaration is the fourth, and the only one whose end is a single
+  // `>` rather than a literal closer — so it needs its opener recognised
+  // first. Everything strict about that recognition is load-bearing; see
+  // [_declarationBodyStart].
+  final int declarationBody = _declarationBodyStart(text, start);
+  if (declarationBody != -1) {
+    final int end = text.indexOf('>', declarationBody);
+    if (end != -1) {
+      return _AngleScan(_AngleScanKind.html, end + 1);
     }
     return _unterminatedAngle(text, start, sourceComplete: sourceComplete);
   }
@@ -446,11 +471,92 @@ _AngleScan _unterminatedAngle(
   int start, {
   required bool sourceComplete,
 }) {
-  if (!sourceComplete || text.startsWith('<!--', start)) {
+  if (!sourceComplete || _authorOptedOut(text, start)) {
     return const _AngleScan(_AngleScanKind.incompleteHtml);
   }
   return const _AngleScan(_AngleScanKind.notAngleSyntax);
 }
+
+/// Whether the opener at [start] is one whose contents the author said not to
+/// show, so a stream that stopped before the closer did not withdraw that.
+///
+/// The comment was the only member when the rule above was written, and the
+/// reason given for it is not about comments: it is about an opener that
+/// declares its own contents unreadable. The other three the spec defines say
+/// the same, and a half-arrived `<?php` is the case where releasing it puts
+/// source code on the screen.
+///
+/// A partly-arrived OPENER is a different question and deliberately not
+/// answered here: `<!-` has always been released and then hidden once `-` and
+/// `-` follow it, and `<![CD` now behaves the same way. Tracking prefixes to
+/// remove that flicker would be a new mechanism for a frame of jitter.
+bool _authorOptedOut(String text, int start) =>
+    _delimitedHtmlAt(text, start) != null ||
+    _declarationBodyStart(text, start) != -1;
+
+/// A raw-HTML construct delimited by a fixed opener and a fixed closer.
+class _DelimitedHtml {
+  const _DelimitedHtml(this.opener, this.closer);
+
+  final String opener;
+  final String closer;
+}
+
+/// The literal-delimited constructs.
+///
+/// No opener here is a prefix of another, so the order does not decide
+/// anything — a fourth one that shares a prefix with these would, and it
+/// would have to say so.
+const List<_DelimitedHtml> _delimitedHtmlConstructs = <_DelimitedHtml>[
+  _DelimitedHtml('<![CDATA[', ']]>'),
+  _DelimitedHtml('<!--', '-->'),
+  _DelimitedHtml('<?', '?>'),
+];
+
+_DelimitedHtml? _delimitedHtmlAt(String text, int start) {
+  for (final _DelimitedHtml construct in _delimitedHtmlConstructs) {
+    if (text.startsWith(construct.opener, start)) {
+      return construct;
+    }
+  }
+  return null;
+}
+
+/// Where a declaration's body begins, or -1 if the `<` at [start] does not
+/// open one.
+///
+/// The spec's declaration is `<!`, **one or more UPPERCASE ASCII letters**,
+/// **whitespace**, characters other than `>`, and `>`. Both emphasised parts
+/// are what keeps this from eating prose: `<!important>` is lowercase and has
+/// no whitespace after the name, so it stays on screen, while `<!DOCTYPE
+/// html>` and `<!ELEMENT br EMPTY>` are declarations. An earlier attempt at
+/// this construct wrote the grammar from memory, dropped both, and deleted a
+/// sentence a reader had written — the whole reason #2366 was split out and
+/// held until the spec's own vectors could decide it.
+///
+/// `<!DOCTYPE>` — no whitespace — is therefore NOT a declaration and is shown.
+/// That is the spec's answer, and it errs toward showing rather than deleting.
+int _declarationBodyStart(String text, int start) {
+  if (!text.startsWith('<!', start)) {
+    return -1;
+  }
+  final int nameStart = start + 2;
+  int cursor = nameStart;
+  while (cursor < text.length && _isUppercaseAsciiLetter(text.codeUnitAt(cursor))) {
+    cursor += 1;
+  }
+  if (cursor == nameStart ||
+      cursor >= text.length ||
+      !_isHtmlWhitespace(text.codeUnitAt(cursor))) {
+    return -1;
+  }
+  while (cursor < text.length && _isHtmlWhitespace(text.codeUnitAt(cursor))) {
+    cursor += 1;
+  }
+  return cursor;
+}
+
+bool _isUppercaseAsciiLetter(int unit) => unit >= 65 && unit <= 90;
 
 bool _isHtmlTagNameStart(String text, int index) {
   if (index >= text.length) {
