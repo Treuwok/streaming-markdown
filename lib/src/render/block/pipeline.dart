@@ -36,7 +36,8 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
     MarkdownRenderNode? lastContainer;
 
     for (final MarkdownRenderNode node in normalized) {
-      final String spanKey = '${node.startCodeUnit}:${node.endCodeUnit}:${node.type}';
+      final String spanKey =
+          '${node.startCodeUnit}:${node.endCodeUnit}:${node.type}';
       if (!seenSpans.add(spanKey)) {
         continue;
       }
@@ -93,11 +94,10 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
         j += 1;
       }
 
-      final MarkdownRenderNode synthesized = _synthesizeTableNodeFromFragments(
-        fragments,
-      );
+      final _SynthesizedTableNode synthesized =
+          _synthesizeTableNodeFromFragments(fragments);
       final _ParsedTable? parsed = _parseMarkdownTable(
-        _normalizedSlice(synthesized.raw, 0),
+        _blockSlice(synthesized),
         allowLooseWithoutDelimiter: true,
         minLooseRowsWithoutDelimiter: 2,
       );
@@ -113,7 +113,7 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
     return out;
   }
 
-  MarkdownRenderNode _synthesizeTableNodeFromFragments(
+  _SynthesizedTableNode _synthesizeTableNodeFromFragments(
     List<MarkdownRenderNode> fragments,
   ) {
     int startByte = fragments.first.startCodeUnit;
@@ -121,9 +121,7 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
     int startRow = fragments.first.startRow;
     int endRow = fragments.first.endRow;
     int depth = fragments.first.depth;
-    final StringBuffer raw = StringBuffer();
-    for (int i = 0; i < fragments.length; i++) {
-      final MarkdownRenderNode fragment = fragments[i];
+    for (final MarkdownRenderNode fragment in fragments) {
       if (fragment.startCodeUnit < startByte) {
         startByte = fragment.startCodeUnit;
       }
@@ -139,25 +137,35 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
       if (fragment.depth < depth) {
         depth = fragment.depth;
       }
-
-      final String line = _normalizedRaw(fragment.raw).trim();
-      if (line.isNotEmpty) {
-        if (raw.isNotEmpty) {
-          raw.writeln();
-        }
-        raw.write(line);
-      }
     }
 
-    return MarkdownRenderNode(
-      type: 'pipe_table',
+    // The rows are still in hand, and each one knows where it starts. Trimming
+    // them into a `String` here and re-deriving positions from that string
+    // later is what lost them: `_normalizedSlice(raw, 0)` can only assume the
+    // text begins at the node's first character, and every space this trim
+    // removes moves everything after it.
+    //
+    // So the trim happens on slices instead. Same deletions, same resulting
+    // text — the origins simply come along, relative to [startByte] because
+    // that is the base every other block's projection is rebased from.
+    final List<_SourceSlice> lines = <_SourceSlice>[];
+    for (final MarkdownRenderNode fragment in fragments) {
+      final _SourceSlice line =
+          _normalizedSlice(fragment.raw, fragment.startCodeUnit - startByte)
+              .trim();
+      if (line.text.isNotEmpty) {
+        lines.add(line);
+      }
+    }
+    final _SourceSlice rawSlice = _joinSliceLines(lines);
+
+    return _SynthesizedTableNode(
       depth: depth,
       startCodeUnit: startByte,
       endCodeUnit: endByte,
       startRow: startRow,
       endRow: endRow,
-      raw: raw.toString(),
-      content: raw.toString(),
+      rawSlice: rawSlice,
     );
   }
 
@@ -224,3 +232,50 @@ extension _StreamingMarkdownBlockPipeline on StreamingMarkdownRenderView {
         type == 'front_matter';
   }
 }
+
+/// A table the renderer assembled out of loose rows the parser emitted
+/// separately — the one block on screen that no parser produced.
+///
+/// Every node a parser emits satisfies `raw == source[startCodeUnit ..
+/// endCodeUnit)`. This one cannot: the rows it joins are indented, and the
+/// indentation is not part of the table. Its text is therefore SHORTER than
+/// its span, and a consumer that rebases that text on `startCodeUnit` puts
+/// every cell after the first removed space in the wrong place.
+///
+/// The fix is not to reconstruct the mapping afterwards — there is nothing
+/// left to reconstruct it from. It is to keep it: [rawSlice] is built while
+/// the rows that carry their own positions are still in hand, which is the
+/// same move [_SourceSlice] exists to make, one level up.
+///
+/// A distinct type rather than a flag, so that the two places that must treat
+/// it differently ([_blockSlice] and `_hasUsableCoordinates`) cannot be
+/// written as if it were an ordinary node.
+class _SynthesizedTableNode extends MarkdownRenderNode {
+  _SynthesizedTableNode({
+    required super.depth,
+    required super.startCodeUnit,
+    required super.endCodeUnit,
+    required super.startRow,
+    required super.endRow,
+    required this.rawSlice,
+  }) : super(
+          type: 'pipe_table',
+          raw: rawSlice.text,
+          content: rawSlice.text,
+        );
+
+  /// [MarkdownRenderNode.raw] with each code unit's offset **within the
+  /// block** — the same base `_normalizedSlice(raw, 0)` produces for an
+  /// ordinary node, so callers rebase it exactly the same way.
+  final _SourceSlice rawSlice;
+}
+
+/// The block's normalized text, and where each character of it came from.
+///
+/// One function so that the ordinary case and the synthesized one cannot drift
+/// apart: for a parser node the mapping is derivable from `raw` because `raw`
+/// IS the slice; for a synthesized table it is carried, because it is not.
+_SourceSlice _blockSlice(MarkdownRenderNode node) =>
+    node is _SynthesizedTableNode
+        ? node.rawSlice
+        : _normalizedSlice(node.raw, 0);

@@ -112,12 +112,16 @@ void main() {
       expect(hiddenText, <String>['<a href="https://x.example">', '</a>']);
     });
 
-    test('a table the renderer synthesizes is not given coordinates', () {
-      // The renderer builds one kind of node that does not slice back out of
-      // the source: a table the parser only emitted loose rows for. It trims
-      // each row before joining them, so the node still spans the original
-      // rows while its text is shorter — and a projection rebased on its start
-      // puts every cell after the first removed space at the wrong offset.
+    test('a table the renderer synthesizes reports its real offsets', () {
+      // The renderer builds one kind of block that no parser produced: a table
+      // assembled from loose rows. It trims each row before joining them, so
+      // the block's text is SHORTER than the span it claims — and for a while
+      // the report answered that by refusing to speak for it at all, which
+      // stopped the scan at the table and left everything after it unpainted.
+      //
+      // The rows know where they start, so the mapping is kept rather than
+      // re-derived from a string it is no longer in. Every cell below is
+      // indented; the offsets must point past the indentation, not at it.
       //
       // The rows below are what the NATIVE parser emits for this input; the
       // pure-Dart parser gives a whole `pipe_table` and never reaches the
@@ -143,25 +147,31 @@ void main() {
         sourceComplete: true,
       );
 
-      // Nothing, rather than cells at coordinates that are off by the spaces
-      // the synthesis removed. Saying less is the direction this report takes
-      // everywhere it cannot speak for the screen.
-      expect(regions.visibleText, isEmpty);
-      expect(regions.visibleSourceOffsets, isEmpty);
+      expect(regions.visibleText, 'a\nb\nc\nd');
 
-      // And the boundary stops at the block, rather than staying where it
-      // was. Leaving the block out of the LEDGER says less; leaving it out of
-      // the BOUNDARY says more — see the next test for what that costs.
-      expect(regions.safeEndCodeUnits, 0);
+      // The assertion that would have failed before: each painted character
+      // read back out of the source at the offset the report gives for it.
+      // Trimmed text rebased on the block's start put `b` on the `|`.
+      final String readBack = <int>[
+        for (final int at in regions.visibleSourceOffsets) at,
+      ].map((int at) => source[at]).join();
+      expect(readBack.replaceAll(RegExp(r'\s'), ''), 'abcd');
+
+      // And the scan no longer stops at the table, so a block after it would
+      // still be reported.
+      expect(regions.safeEndCodeUnits, source.length);
     });
 
     test('and an unfinished link inside that table is not declared safe', () {
-      // The half that matters. Omitting a block from the ledger under-counts
-      // the text, which is harmless. Omitting it from the boundary means the
-      // report says "everything up to the end is safe" about a block it never
-      // looked at — and a cell here holds a destination that has not finished
-      // arriving. The caller paints `source.substring(0, safeEndCodeUnits)`,
-      // so a boundary of `source.length` puts that URL on the screen.
+      // The half that matters. A cell here holds a destination that has not
+      // finished arriving, and the caller paints
+      // `source.substring(0, safeEndCodeUnits)` — so a boundary of
+      // `source.length` puts that URL on the screen.
+      //
+      // This used to be protected by the table being skipped whole. It is not
+      // skipped any more, so the protection now has to come from the inline
+      // rules reading the cell — which is the point: the block is examined
+      // rather than excused.
       const String source = '  a | b  \n  c | [x](https://secret.example  ';
       final int newline = source.indexOf('\n');
       MarkdownRenderNode row(int start, int end, int line) =>
@@ -175,43 +185,40 @@ void main() {
             raw: source.substring(start, end),
             content: source.substring(start, end),
           );
+      List<MarkdownRenderNode> blocks() => <MarkdownRenderNode>[
+            row(0, newline, 0),
+            row(newline + 1, source.length, 1),
+          ];
 
       final WithheldMarkdownRegions regions = analyzeWithheldMarkdownRegions(
         source,
-        blocks: <MarkdownRenderNode>[
-          row(0, newline, 0),
-          row(newline + 1, source.length, 1),
-        ],
+        blocks: blocks(),
         suppressRawHtml: true,
       );
 
       expect(source.substring(0, regions.safeEndCodeUnits),
           isNot(contains('secret.example')));
 
-      // The same block with destination withholding turned OFF but raw-HTML
-      // suppression left on. That combination still has a rule that withholds
-      // (an unfinished `href` in a tag), so the boundary must still stop —
-      // gating this on the destination flag alone reopens the hole.
+      // With destination withholding OFF the caller has asked for the
+      // historical behaviour — an unresolved `[label](https://…` painted as
+      // literal source — so there is nothing left to withhold here and the
+      // boundary is free to reach the end. Before, the boundary stopped at 0
+      // for a reason that had nothing to do with this input: the block was
+      // never read. That is no longer a reason.
       final WithheldMarkdownRegions htmlOnly = analyzeWithheldMarkdownRegions(
         source,
-        blocks: <MarkdownRenderNode>[
-          row(0, newline, 0),
-          row(newline + 1, source.length, 1),
-        ],
+        blocks: blocks(),
         withholdIncompleteDestinations: false,
         suppressRawHtml: true,
       );
-      expect(htmlOnly.safeEndCodeUnits, 0);
+      expect(htmlOnly.safeEndCodeUnits, source.length);
 
       // With every withholding rule off there is nothing to protect, so the
       // report keeps its boundary rather than throwing the rest away.
       final WithheldMarkdownRegions nothingWithheld =
           analyzeWithheldMarkdownRegions(
         source,
-        blocks: <MarkdownRenderNode>[
-          row(0, newline, 0),
-          row(newline + 1, source.length, 1),
-        ],
+        blocks: blocks(),
         withholdIncompleteDestinations: false,
         suppressRawHtml: false,
       );

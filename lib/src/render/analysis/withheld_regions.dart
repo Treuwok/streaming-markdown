@@ -110,6 +110,12 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       visibleSourceOffsets: <int>[],
     );
   }
+  // Deliberately the EXACT comparison, and deliberately not the same question
+  // as [_hasUsableCoordinates]. This one asks "did these blocks come from THIS
+  // string" — a caller handing over a stale parse whose text happens to be the
+  // same length passes any check made of lengths, and every offset in the
+  // report then names a character nobody read. It is affordable here because
+  // it runs once per call rather than per block per outcome.
   assert(
     blocks.every((MarkdownRenderNode node) =>
         node.startCodeUnit >= 0 &&
@@ -698,23 +704,41 @@ _BlockOutcome _outcomeFor(
   return const _Readable();
 }
 
-/// Whether [block]'s span really is where its text lives in [source].
+/// Whether this block's text can be placed in [source] at all.
 ///
-/// `_collectRenderableBlocks` synthesizes one kind of node — a table the
-/// parser only emitted loose rows for — and it trims each row before joining
-/// them, so the node spans the original rows while its text is shorter. The
-/// renderer is fine with that; it only paints the text. This report is
-/// coordinates, and a projection rebased on that node's start puts every cell
-/// after the first removed space in the wrong place.
+/// Two ways it can be, and a node has to be one of them. Either its `raw` IS
+/// the slice — true of everything a parser emits, and checkable by length —
+/// or it carries its own mapping, which is what [_SynthesizedTableNode] does
+/// because its text is deliberately shorter than its span.
 ///
-/// Length, not content: every way a node stops slicing back out makes its text
-/// SHORTER, and the exact comparison is a substring of the whole document per
-/// block per parse on a streaming path. The exact one runs in debug, on the
-/// caller's blocks, at the top of the scan.
+/// This used to be the mechanism that kept a synthesized table out of the
+/// report, and the cost was paid on screen: a loose table with indented rows
+/// stopped the scan at its first row, so everything after it went unpainted.
+/// The mapping is kept now, so the block reports like any other and only a
+/// producer this file has never seen can fail here.
+///
+/// Kept anyway, and it is worth being exact about what it is now, because
+/// "a check nobody has watched go red" is usually a reason to delete one.
+/// It cannot be made to fire from a test any more: the only node that used to
+/// fail it now carries its mapping, and the entry assertion rejects a caller
+/// block that would fail it before the scan starts. That is a property of
+/// where it sits, not evidence that it protects nothing — the entry assertion
+/// does not run in release, and a node claiming a span its text does not fill
+/// shifts every offset after the gap. The consumer of those offsets CUTS the
+/// message at one of them, so the failure is a destination on screen rather
+/// than a wrong pixel.
+///
+/// Length, not content — and that is the difference from the entry assertion,
+/// which IS content. Deliberately two questions: "did these blocks come from
+/// this string" is asked once per call and can afford a substring of the whole
+/// document; "could this node's text fill this span" is asked per block per
+/// parse on a streaming path and cannot. Folding them into one predicate
+/// silently demotes the first to the second.
 bool _hasUsableCoordinates(String source, MarkdownRenderNode block) =>
     block.startCodeUnit >= 0 &&
     block.endCodeUnit <= source.length &&
-    block.endCodeUnit - block.startCodeUnit == block.raw.length;
+    (block is _SynthesizedTableNode ||
+        block.endCodeUnit - block.startCodeUnit == block.raw.length);
 
 /// Whether [block] was parsed under the line-ending rules CommonMark uses.
 ///
