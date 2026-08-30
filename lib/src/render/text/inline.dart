@@ -144,8 +144,7 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
             // label. Reporting only the inner range left `[](https://outer)`
             // behind for anything that rebuilds text from the ranges, which
             // put the OUTER destination into a copied selection.
-            _hiddenRanges
-                .removeWhere((range) => range.$1 >= offset + i);
+            _hiddenRanges.removeWhere((range) => range.$1 >= offset + i);
             _hiddenRanges.add((offset + i, offset + link.end));
           } else {
             for (final _InlineToken token in labelTokens) {
@@ -217,6 +216,48 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
           ),
         );
         i = latex.end;
+        continue;
+      }
+
+      // Escapes are consumed before the constructs whose openers they cancel:
+      // `\\[` must not open a link, `\\*` must not open emphasis. The dispatch
+      // asks "does a construct start here", and an escaped punctuation mark is
+      // a construct start the author explicitly cancelled.
+      //
+      // AFTER the LaTeX attempt above, deliberately. This package documents
+      // `\\(…\\)` and `\\[…\\]` as math delimiters, so those two openers have a
+      // meaning that outranks "escaped paren". Placing this branch at the top
+      // of the loop — where it started — stopped both forms from ever
+      // rendering as math. Nothing between `![` and here can fire on a
+      // backslash, so the earlier position bought nothing.
+      //
+      // Scope, stated because the gap is invisible from here: this handles an
+      // escaped OPENER. An escaped CLOSER inside a construct that is scanned
+      // by look-ahead — `[foo \\] bar](url)`, `*foo \\* bar*` — never reaches this
+      // branch, because `_scanInlineLinkAt` / `_matchDelimited` have already
+      // decided where the construct ends and they do not skip escapes. That
+      // blindness predates this branch (verified: those two inputs render
+      // byte-identically with and without it) and fixing it means changing
+      // those scanners, which is a different change.
+      //
+      // The escaped character becomes a token of its OWN rather than being
+      // appended to the plain run. A plain run is a verbatim slice — character
+      // `k` of it comes from `plainStart + k` — and dropping the backslash
+      // breaks that equality for everything after it in the same run. Same
+      // failure the block layer had with a table it assembled by trimming: the
+      // text got shorter than the span it claimed, and every offset after the
+      // removed character pointed one place too early.
+      if (text.codeUnitAt(i) == 92 /* \\ */ &&
+          i + 1 < text.length &&
+          _isCommonMarkPunctuation(text.codeUnitAt(i + 1))) {
+        flushPlain();
+        tokens.add(_InlineToken.text(
+            text: text[i + 1],
+            style: style,
+            sourceMarkdown: text.substring(i, i + 2),
+            visibleSourceStart: offset + i + 1));
+        i += 2;
+        plainStart = offset + i;
         continue;
       }
 
@@ -499,3 +540,15 @@ _FootnoteReferenceMatch? _matchFootnoteReferenceAt(String text, int start) {
   }
   return _FootnoteReferenceMatch(id: match.group(1)!, end: match.end);
 }
+
+/// The ASCII punctuation a backslash may escape, per CommonMark.
+///
+/// A fixed set defined by the spec, not a judgement call: a backslash before
+/// anything else — a letter, a digit, a newline — is itself literal, which is
+/// why the caller checks membership rather than assuming every backslash
+/// starts an escape.
+bool _isCommonMarkPunctuation(int codeUnit) =>
+    (codeUnit >= 0x21 && codeUnit <= 0x2f) ||
+    (codeUnit >= 0x3a && codeUnit <= 0x40) ||
+    (codeUnit >= 0x5b && codeUnit <= 0x60) ||
+    (codeUnit >= 0x7b && codeUnit <= 0x7e);

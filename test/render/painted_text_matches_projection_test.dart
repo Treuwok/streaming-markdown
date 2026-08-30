@@ -107,6 +107,11 @@ void main() {
     ('the table run ends where the renderer ends it',
         'a|b\nc|d\nplain\ne|f'),
 
+    // ---- backslash escapes: the screen and the report agree about them ----
+    ('an escaped bracket', r'a \[b] c'),
+    ('escaped emphasis markers', r'a \*not em\* b'),
+    ('an escaped backslash', r'a \\ b'),
+
     // ---- callouts ----
     ('a custom callout title is source text', '> [!NOTE] same\n> same'),
     ('a default callout title is generated', '> [!WARNING]\n> body'),
