@@ -266,22 +266,26 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
   // is one function, and this calls it rather than owning a second opinion.
   for (final MarkdownRenderNode block
       in projections._collectRenderableBlocks(blocks)) {
-    // Coordinates that do not slice back out are a LEDGER fault: nobody knows
-    // where this block's characters live, so it contributes none of them. That
-    // is true whatever the withholding flags say, and gating it on them (which
-    // the single predicate here used to do) left a caller with both rules off
-    // holding a table's worth of offsets pointing at the wrong characters.
-    //
-    // Whether it also moves the BOUNDARY is a separate question with a
-    // separate answer, and conflating the two is the whole subject of this
-    // function: the boundary only has to retreat if something in the
-    // unexamined block COULD have been withheld. With every rule off, nothing
-    // could, and retreating would cost a table and everything after it for
-    // nothing.
-    if (!_hasUsableCoordinates(source, block)) {
-      if (!anythingCouldBeWithheld) {
-        continue;
-      }
+    // One classification, and it answers BOTH questions — because answering
+    // only one is the mistake this loop has made seven times. See
+    // [_BlockOutcome].
+    final _BlockOutcome outcome = _outcomeFor(
+      source,
+      block,
+      sourceComplete: sourceComplete,
+      anythingCouldBeWithheld: anythingCouldBeWithheld,
+      hideLinkReferenceDefinitions: hideLinkReferenceDefinitions,
+      suppressRawHtml: suppressRawHtml,
+    );
+
+    // Exhaustive on purpose: a fourth boundary effect must be handled here
+    // before this compiles, rather than defaulting into "carry on".
+    final bool stopsScan = switch (outcome.boundary) {
+      _BoundaryEffect.stopScanHere => true,
+      _BoundaryEffect.unaffected => false,
+      _BoundaryEffect.decidedByInlineRules => false,
+    };
+    if (stopsScan) {
       // The scan stops here, and saying so is the whole mechanism: the loop
       // ends, so nothing past this point can raise the water mark, and the
       // boundary below can only land at or before this block's start.
@@ -290,42 +294,31 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegions(
       // choose a POSITION, and the tempting one — the exact code unit the
       // trouble starts at — was wrong every time, because the part BEFORE it
       // was not read either: this block is skipped in one piece.
-      // `[x](https://secret.example\rmore` handed the destination straight to
-      // the caller that way.
+      // `[x](https://secret.example\rmore` handed the destination straight
+      // to the caller that way.
       //
       // Stopping is also what keeps the ledger clean, and it is worth being
       // exact about why, because the obvious reason is false: NOT every
       // character the loop would still have produced lives past this point.
       // The block separator does not — `flushSeparator` gives it an offset
-      // derived from the block BEFORE it, just under the boundary, so the clip
-      // at the end of this function keeps it and `visibleText` ends in a `\n`
-      // separating the last block from nothing. Ending the loop is what stops
-      // that separator from ever being asked for.
+      // derived from the block BEFORE it, just under the boundary, so the
+      // clip at the end of this function keeps it and `visibleText` ends in
+      // a `\n` separating the last block from nothing. Ending the loop is
+      // what stops that separator from ever being asked for.
       scannedUpTo = block.startCodeUnit;
       break;
     }
 
-    // A grammar the parser and the spec disagree about is a WITHHOLDING fault,
-    // not a ledger one: this block's coordinates are fine and the renderer read
-    // it exactly the same way, so the ledger can speak for it. What it cannot
-    // do is promise that a half-arrived destination further on was seen.
-    if (anythingCouldBeWithheld &&
-        !_readsUnderTheSameGrammar(source, block,
-            sourceComplete: sourceComplete)) {
-      scannedUpTo = block.startCodeUnit;
-      break;
-    }
-
-    if (hideLinkReferenceDefinitions &&
-        block.type == 'link_reference_definition') {
-      continue;
-    }
-
-    if (suppressRawHtml && _isRawTextHtmlBlock(block)) {
-      // Nothing inside these is prose, so the block parser's extent IS the
-      // hidden range — no second scan for where the element ends.
-      hidden.add((block.startCodeUnit, block.endCodeUnit));
-      continue;
+    switch (outcome.ledger) {
+      case _LedgerEffect.contributesNothing:
+        continue;
+      case _LedgerEffect.hidesWholeBlock:
+        // Nothing inside these is prose, so the block parser's extent IS the
+        // hidden range — no second scan for where the element ends.
+        hidden.add((block.startCodeUnit, block.endCodeUnit));
+        continue;
+      case _LedgerEffect.projectsBlock:
+        break;
     }
 
     // Every OTHER block of raw HTML gets no rule of its own. Suppressing raw
@@ -532,6 +525,178 @@ WithheldMarkdownRegions analyzeWithheldMarkdownRegionsOfSource(
       allowUnclosedInlineDelimiters: allowUnclosedInlineDelimiters,
       hideLinkReferenceDefinitions: hideLinkReferenceDefinitions,
     );
+
+/// What one block's classification means for each of the report's two halves.
+///
+/// The loop used to answer both by which control-flow keyword happened to be
+/// written — a `continue` here, a `break` there — so a new kind of block could
+/// be added while thinking about only one of them. That went wrong seven
+/// times, and the seventh was committed while fixing the sixth: two facts were
+/// correctly split apart and then answered with the same reaction.
+///
+/// The two halves are not variations on one question. The same cautious
+/// reflex — "this block is doubtful, leave it alone" — means opposite things:
+///
+/// * for the ledger ([WithheldMarkdownRegions.visibleText] and its offsets),
+///   leaving it alone is SAFE. The block's characters simply stay out, and a
+///   reveal cursor with too few of them just paces slowly.
+/// * for the boundary ([WithheldMarkdownRegions.safeEndCodeUnits]), leaving it
+///   alone is a LEAK. That number is how much source the caller may paint, so
+///   a doubtful block that does not make it RETREAT gets painted anyway,
+///   unfinished destination and all.
+///
+/// So one reflex is right for one half and wrong for the other, and nothing in
+/// a chain of `if`s says which half you just answered.
+///
+/// Both answers are abstract members: a sixth outcome does not compile until
+/// it states each one. That is the whole mechanism — it is not a check that
+/// runs, it is a shape that cannot be left half-filled. The use sites switch
+/// exhaustively over the two enums for the same reason.
+sealed class _BlockOutcome {
+  const _BlockOutcome();
+
+  /// What this block contributes to the visible-text ledger.
+  _LedgerEffect get ledger;
+
+  /// What this block does to the safe boundary.
+  _BoundaryEffect get boundary;
+}
+
+/// What a block contributes to [WithheldMarkdownRegions.visibleText].
+enum _LedgerEffect {
+  /// Inline-parsed and projected, the ordinary path.
+  projectsBlock,
+
+  /// The block's whole span is hidden; none of it is prose.
+  hidesWholeBlock,
+
+  /// Nothing of this block reaches the ledger.
+  contributesNothing,
+}
+
+/// What a block does to [WithheldMarkdownRegions.safeEndCodeUnits].
+enum _BoundaryEffect {
+  /// Left to the inline scan, which may withhold from part way through.
+  decidedByInlineRules,
+
+  /// This block cannot move it.
+  unaffected,
+
+  /// The scan cannot read past this block, so it ends here and the boundary
+  /// lands at or before this block's start.
+  stopScanHere,
+}
+
+/// An ordinary block: projected, and free to withhold from within itself.
+final class _Readable extends _BlockOutcome {
+  const _Readable();
+
+  @override
+  _LedgerEffect get ledger => _LedgerEffect.projectsBlock;
+
+  @override
+  _BoundaryEffect get boundary => _BoundaryEffect.decidedByInlineRules;
+}
+
+/// The block's coordinates do not slice back out of [source].
+///
+/// A ledger fault first: nobody knows where these characters live, so the
+/// ledger cannot speak for them whatever the flags say. Gating THAT on the
+/// flags — which the single predicate here used to do — left a caller with
+/// both rules off holding a table's worth of offsets pointing at the wrong
+/// characters.
+///
+/// Whether it also moves the boundary is the separate question, and the answer
+/// depends on [anyRuleArmed]: the boundary only has to retreat if something in
+/// the unexamined block COULD have been withheld. With every rule off, nothing
+/// could, and retreating would cost a table and everything after it for
+/// nothing.
+final class _UnusableCoordinates extends _BlockOutcome {
+  const _UnusableCoordinates({required this.anyRuleArmed});
+
+  /// Whether any withholding rule is switched on for this call.
+  final bool anyRuleArmed;
+
+  @override
+  _LedgerEffect get ledger => _LedgerEffect.contributesNothing;
+
+  @override
+  _BoundaryEffect get boundary => anyRuleArmed
+      ? _BoundaryEffect.stopScanHere
+      : _BoundaryEffect.unaffected;
+}
+
+/// The parser and the spec disagree about this block's line grammar.
+///
+/// A withholding fault, not a ledger one: the coordinates are fine and the
+/// renderer read the block exactly the same way. What the scan cannot do is
+/// promise that a half-arrived destination further on was seen — so it stops,
+/// and stopping is what keeps this block out of the ledger too.
+final class _GrammarMismatch extends _BlockOutcome {
+  const _GrammarMismatch();
+
+  @override
+  _LedgerEffect get ledger => _LedgerEffect.contributesNothing;
+
+  @override
+  _BoundaryEffect get boundary => _BoundaryEffect.stopScanHere;
+}
+
+/// The caller draws this block itself, or not at all.
+///
+/// Off the screen, so off the ledger; still real source that was read, so the
+/// boundary does not move.
+final class _CallerHidden extends _BlockOutcome {
+  const _CallerHidden();
+
+  @override
+  _LedgerEffect get ledger => _LedgerEffect.contributesNothing;
+
+  @override
+  _BoundaryEffect get boundary => _BoundaryEffect.unaffected;
+}
+
+/// Raw-text HTML with [suppressRawHtml] on: the whole span is hidden.
+final class _RawTextHtml extends _BlockOutcome {
+  const _RawTextHtml();
+
+  @override
+  _LedgerEffect get ledger => _LedgerEffect.hidesWholeBlock;
+
+  @override
+  _BoundaryEffect get boundary => _BoundaryEffect.unaffected;
+}
+
+/// Which outcome [block] falls into.
+///
+/// The order is the contract, and one of the steps depends on it:
+/// [_readsUnderTheSameGrammar] indexes [source], which is only safe once
+/// [_hasUsableCoordinates] has said the span is real.
+_BlockOutcome _outcomeFor(
+  String source,
+  MarkdownRenderNode block, {
+  required bool sourceComplete,
+  required bool anythingCouldBeWithheld,
+  required bool hideLinkReferenceDefinitions,
+  required bool suppressRawHtml,
+}) {
+  if (!_hasUsableCoordinates(source, block)) {
+    return _UnusableCoordinates(anyRuleArmed: anythingCouldBeWithheld);
+  }
+  if (anythingCouldBeWithheld &&
+      !_readsUnderTheSameGrammar(source, block,
+          sourceComplete: sourceComplete)) {
+    return const _GrammarMismatch();
+  }
+  if (hideLinkReferenceDefinitions &&
+      block.type == 'link_reference_definition') {
+    return const _CallerHidden();
+  }
+  if (suppressRawHtml && _isRawTextHtmlBlock(block)) {
+    return const _RawTextHtml();
+  }
+  return const _Readable();
+}
 
 /// Whether [block]'s span really is where its text lives in [source].
 ///
