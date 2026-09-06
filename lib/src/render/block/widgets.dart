@@ -213,7 +213,6 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
     final DateTime? tokenScheduleOrigin = scheduleScope?.revealedAt;
     final Duration resolvedTokenStep =
         scheduleScope?.tokenArrivalDelay ?? tokenStaggerDelay;
-    final bool compacted = _TokenCompactionScope.isCompacted(context);
 
     final List<InlineSpan> spans = <InlineSpan>[];
     _appendTokenizedTextSpans(
@@ -226,7 +225,7 @@ extension _StreamingMarkdownBlockWidgets on StreamingMarkdownRenderView {
       tokenStaggerDelay: resolvedTokenStep,
       tokenScheduleOrigin: tokenScheduleOrigin,
       tokenAnimationBuilder: tokenAnimationBuilder,
-      animatePerWord: !compacted,
+      animatePerWord: _animatePerWord(context),
     );
 
     return MouseRegion(

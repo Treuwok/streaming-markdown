@@ -744,12 +744,42 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     );
   }
 
-  bool _shouldLockFinalizedSelectionVisual() {
-    return tokenArrivalDelay > Duration.zero ||
-        _resolvedTokenFadeInDuration() > Duration.zero ||
-        tokenAnimationBuilder != null ||
-        tokenAnimationPaused;
-  }
+  /// Whether a per-token reveal will actually be painted.
+  ///
+  /// This is the same condition [_FadeInTokenHost] uses to decide whether to
+  /// animate at all: with a non-positive duration it returns its child
+  /// unchanged, ignoring both the scheduled start and the animation builder.
+  /// Neither [tokenArrivalDelay] nor [tokenAnimationBuilder] can therefore
+  /// produce a reveal on its own — only a positive fade duration can.
+  ///
+  /// It gates [_animatePerWord], which decides whether inline text is split
+  /// into one [WidgetSpan] per whitespace-delimited run. That split is what a
+  /// reveal needs — a token can only fade in on its own if it is its own
+  /// widget — and it **costs line breaking**: a [WidgetSpan] is atomic to the
+  /// line breaker, so once text is split this way the only break opportunities
+  /// left are the whitespace runs between the spans. Scripts that do not
+  /// separate words with spaces — CJK, Thai, Lao — lose every break
+  /// opportunity inside a clause. Paying that with no reveal to show buys
+  /// nothing.
+  bool get _tokenRevealIsPainted =>
+      _resolvedTokenFadeInDuration() > Duration.zero;
+
+  /// Whether inline text should be split into one animated span per word.
+  ///
+  /// `compacted` alone is not enough: it only says the reveal has *settled*,
+  /// not that there was ever a reveal to settle.
+  bool _animatePerWord(BuildContext context) =>
+      _tokenRevealIsPainted && !_TokenCompactionScope.isCompacted(context);
+
+  /// Deliberately wider than [_tokenRevealIsPainted]: this asks whether there
+  /// is a reveal *context* at all, which a pending arrival delay, a custom
+  /// builder, or a pause all establish even when nothing is being painted yet.
+  /// Layout must not use this — see [_tokenRevealIsPainted].
+  bool _shouldLockFinalizedSelectionVisual() =>
+      tokenArrivalDelay > Duration.zero ||
+      _tokenRevealIsPainted ||
+      tokenAnimationBuilder != null ||
+      tokenAnimationPaused;
 
   Map<String, _MarkdownSelectionBlockRange> _buildSelectionBlockRanges(
     List<MarkdownRenderNode> blocks,
