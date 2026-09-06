@@ -261,7 +261,12 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
         continue;
       }
 
-      final _DelimitedMatch? code = _matchDelimited(text, i, '`');
+      // The one delimiter the spec exempts: "Backslash escapes do not work
+      // in code blocks, code spans, autolinks, or raw HTML". `` `a \` b` ``
+      // really does end at that backtick, and honouring the escape here
+      // would be a spec violation dressed up as a fix.
+      final _DelimitedMatch? code =
+          _matchDelimited(text, i, '`', honoursBackslashEscapes: false);
       if (code != null) {
         flushPlain();
         tokens.add(
@@ -284,6 +289,7 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
         text,
         i,
         '***',
+        honoursBackslashEscapes: true,
         allowUnclosedTail: allowUnclosedDelimiters,
       );
       if (boldItalicStar != null) {
@@ -304,6 +310,7 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
         text,
         i,
         '___',
+        honoursBackslashEscapes: true,
         allowUnclosedTail: allowUnclosedDelimiters,
       );
       if (boldItalicUnderscore != null) {
@@ -327,6 +334,7 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
             '**',
             '__',
           ],
+          honoursBackslashEscapes: true,
           allowUnclosedDelimiters: allowUnclosedDelimiters);
       if (bold != null) {
         flushPlain();
@@ -342,7 +350,8 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
         continue;
       }
 
-      final _DelimitedMatch? strike = _matchDelimited(text, i, '~~');
+      final _DelimitedMatch? strike =
+          _matchDelimited(text, i, '~~', honoursBackslashEscapes: true);
       if (strike != null) {
         flushPlain();
         tokens.addAll(
@@ -361,6 +370,7 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
         text,
         i,
         '*',
+        honoursBackslashEscapes: true,
         allowUnclosedTail: allowUnclosedDelimiters,
       );
       if (italicStar != null) {
@@ -381,6 +391,7 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
         text,
         i,
         '_',
+        honoursBackslashEscapes: true,
         allowUnclosedTail: allowUnclosedDelimiters,
       );
       if (italicUnderscore != null) {
@@ -498,7 +509,13 @@ int _findUnescapedDelimiter(String text, String delimiter, int start) {
     if (!_isEscaped(text, found)) {
       return found;
     }
-    index = found + delimiter.length;
+    // Advance by ONE, not by the delimiter's length. A multi-character run can
+    // overlap the escaped one: in `~~x \~~~ y`, the `~~` found at the escaped
+    // tilde is not a closer, but the `~~` starting one character later is —
+    // skipping the whole width steps over it and the construct never closes.
+    // With a single-character delimiter the two are the same, which is why
+    // this only ever showed up on `~~` and `$$`.
+    index = found + 1;
   }
   return -1;
 }
@@ -517,6 +534,7 @@ _DelimitedMatch? _matchAnyDelimited(
   String text,
   int start,
   List<String> delimiters, {
+  required bool honoursBackslashEscapes,
   required bool allowUnclosedDelimiters,
 }) {
   for (final String delimiter in delimiters) {
@@ -524,6 +542,7 @@ _DelimitedMatch? _matchAnyDelimited(
       text,
       start,
       delimiter,
+      honoursBackslashEscapes: honoursBackslashEscapes,
       allowUnclosedTail: allowUnclosedDelimiters,
     );
     if (match != null) {
@@ -547,6 +566,34 @@ _FootnoteReferenceMatch? _matchFootnoteReferenceAt(String text, int start) {
 /// anything else — a letter, a digit, a newline — is itself literal, which is
 /// why the caller checks membership rather than assuming every backslash
 /// starts an escape.
+/// Drop the backslashes that made punctuation literal.
+///
+/// The other half of honouring an escape. Skipping an escaped closer decides
+/// where a construct ENDS; this decides what its text IS. Emphasis and link
+/// labels get it for free because their inner text is scanned again, and that
+/// scan already consumes escapes (#2356). A destination and an image's alt do
+/// not: they are cut straight out of the source and handed on. Without this,
+/// finding the right `)` in `[t](https://x/a\)b)` produces a link whose
+/// target still carries the backslash — a tappable link to a URL that does
+/// not exist, which is worse than the unparsed text it replaced.
+String _unescapeBackslashEscapes(String value) {
+  if (!value.contains(r'\')) {
+    return value;
+  }
+  final StringBuffer out = StringBuffer();
+  for (int i = 0; i < value.length; i += 1) {
+    if (value.codeUnitAt(i) == 92 /* \ */ &&
+        i + 1 < value.length &&
+        _isCommonMarkPunctuation(value.codeUnitAt(i + 1))) {
+      out.writeCharCode(value.codeUnitAt(i + 1));
+      i += 1;
+      continue;
+    }
+    out.writeCharCode(value.codeUnitAt(i));
+  }
+  return out.toString();
+}
+
 bool _isCommonMarkPunctuation(int codeUnit) =>
     (codeUnit >= 0x21 && codeUnit <= 0x2f) ||
     (codeUnit >= 0x3a && codeUnit <= 0x40) ||
