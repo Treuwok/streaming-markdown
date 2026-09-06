@@ -120,7 +120,7 @@ void main() {
     });
   });
 
-  group('the escape is removed from the values, not just stepped over', () {
+  group('what each extracted value does with the escape', () {
     // Finding the right closer decides where a construct ENDS; it does not
     // decide what its text IS. A label's inner text is scanned again and the
     // escape disappears there, but a destination and an image's alt are cut
@@ -150,32 +150,35 @@ void main() {
       expect(tapped, 'https://x/a)b');
     });
 
-    testWidgets('an image alt loses the backslash', (
+    testWidgets('an image alt keeps the source text verbatim', (
       WidgetTester tester,
     ) async {
-      // Asserted on what the reader actually gets. A network image cannot load
-      // in a widget test, so the renderer falls back to painting the alt — the
-      // same string it hands to selection and to screen readers. The earlier
-      // version of this test asked the visible-text projection instead and was
-      // GREEN with the fix removed, because a parsed image is hidden from that
-      // projection either way.
+      // The alt is deliberately NOT unescaped. It is inline content — the same
+      // grammar as a link label — so `\]` should become `]` but a `\*` inside
+      // a code span must stay, because the spec exempts code spans from
+      // escapes. A string-level unescape cannot tell those apart: an earlier
+      // version of this change ran one here and turned this alt into
+      // `` `a*b` ``, corrupting text that was correct before it.
+      //
+      // Doing it properly means projecting the alt through the inline parser
+      // (what the label beside it already does), which is a separate change.
+      // Until then the alt stays as written, and this test is what stops a
+      // blanket unescape coming back.
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
             body: StreamingMarkdownRenderView(
               nodes: <MarkdownRenderNode>[
-                _node(r'see ![alt \] x](https://i/x.png) here'),
+                _node(r'see ![`a\*b`](https://i/x.png) here'),
               ],
               padding: EdgeInsets.zero,
             ),
           ),
         ),
       );
-      // Two pumps: the network load fails asynchronously, and the alt is only
-      // painted once it has.
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
-      expect(find.text('image: alt ] x'), findsOneWidget);
+      expect(find.text(r'image: `a\*b`'), findsOneWidget);
     });
   });
 }

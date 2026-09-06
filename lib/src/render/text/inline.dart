@@ -560,22 +560,22 @@ _FootnoteReferenceMatch? _matchFootnoteReferenceAt(String text, int start) {
   return _FootnoteReferenceMatch(id: match.group(1)!, end: match.end);
 }
 
-/// The ASCII punctuation a backslash may escape, per CommonMark.
-///
-/// A fixed set defined by the spec, not a judgement call: a backslash before
-/// anything else — a letter, a digit, a newline — is itself literal, which is
-/// why the caller checks membership rather than assuming every backslash
-/// starts an escape.
-/// Drop the backslashes that made punctuation literal.
+/// Drop the backslashes that made punctuation literal — **in a destination**.
 ///
 /// The other half of honouring an escape. Skipping an escaped closer decides
 /// where a construct ENDS; this decides what its text IS. Emphasis and link
 /// labels get it for free because their inner text is scanned again, and that
-/// scan already consumes escapes (#2356). A destination and an image's alt do
-/// not: they are cut straight out of the source and handed on. Without this,
-/// finding the right `)` in `[t](https://x/a\)b)` produces a link whose
-/// target still carries the backslash — a tappable link to a URL that does
-/// not exist, which is worse than the unparsed text it replaced.
+/// scan already consumes escapes (#2356). A DESTINATION does not: it is cut
+/// straight out of the source and handed on. Without this, finding the right
+/// `)` in `[t](https://x/a\)b)` produces a link whose target still carries the
+/// backslash — a tappable link to a URL that does not exist, which is worse
+/// than the unparsed text it replaced.
+///
+/// ⚠️ **Destinations only.** Do not reach for this on anything that is INLINE
+/// CONTENT — an image's alt, a label. Escapes do not apply inside a code span
+/// and this cannot see code spans, so it turns `` ![`a\*b`](x) `` into
+/// `` `a*b` ``. Inline content belongs to the inline parser, which knows both
+/// rules; that is why the label beside the alt is already correct.
 String _unescapeBackslashEscapes(String value) {
   if (!value.contains(r'\')) {
     return value;
@@ -594,6 +594,12 @@ String _unescapeBackslashEscapes(String value) {
   return out.toString();
 }
 
+/// The ASCII punctuation a backslash may escape, per CommonMark.
+///
+/// A fixed set defined by the spec, not a judgement call: a backslash before
+/// anything else — a letter, a digit, a newline — is itself literal, which is
+/// why the caller checks membership rather than assuming every backslash
+/// starts an escape.
 bool _isCommonMarkPunctuation(int codeUnit) =>
     (codeUnit >= 0x21 && codeUnit <= 0x2f) ||
     (codeUnit >= 0x3a && codeUnit <= 0x40) ||

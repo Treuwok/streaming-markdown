@@ -152,8 +152,27 @@ _InlineImageMatch? _matchInlineImageAt(String text, int start) {
     return null;
   }
 
-  final String alt =
-      _unescapeBackslashEscapes(text.substring(start + 2, closeBracket).trim());
+  // NOT unescaped, and that is a deliberate retreat from an earlier version of
+  // this change. An image's description is INLINE CONTENT — the same grammar as
+  // a link label — so a `\]` in it should become `]`, but a `\*` inside a code
+  // span should stay a backslash, because the spec exempts code spans from
+  // escapes. A string-level unescape cannot tell those apart: it turned
+  // `` ![`a\*b`](x) `` into `` `a*b` ``, corrupting an alt that was correct
+  // before this change.
+  //
+  // The right treatment is to project the alt through the inline parser, which
+  // already knows both rules — that is what the link LABEL beside it does, and
+  // why the label has always been correct. The parser is even in scope at the
+  // call site; what is missing is a token-to-plain-text projection at this
+  // layer, and the existing one lives in the render layer behind a footnote
+  // numbering map. That is a shape decision, not a line: tracked as
+  // drwu-ai-assitant#2569.
+  //
+  // So the alt stays as written. Against `main` that adds no new failure: an
+  // `![alt \] x](url)` there did not parse as an image at all and the whole
+  // markup, URL included, was painted as prose. This change makes it an image;
+  // its alt carrying a backslash is the pre-existing gap above, not a new one.
+  final String alt = text.substring(start + 2, closeBracket).trim();
   final String rawUrl = text.substring(closeBracket + 2, closeParen).trim();
   if (rawUrl.isEmpty) {
     return null;
