@@ -2887,12 +2887,12 @@ class Greeter {
       ),
     );
 
-    expect(find.text('first'), findsOneWidget);
-    expect(find.text('second'), findsNothing);
+    expect(find.text('first', findRichText: true), findsOneWidget);
+    expect(find.text('second', findRichText: true), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 600));
 
-    expect(find.text('second'), findsOneWidget);
+    expect(find.text('second', findRichText: true), findsOneWidget);
   });
 
   testWidgets('second table does not render before first table tokens complete',
@@ -2927,12 +2927,12 @@ class Greeter {
       ),
     );
 
-    expect(find.text('A'), findsOneWidget);
-    expect(find.text('E'), findsNothing);
+    expect(find.text('A', findRichText: true), findsOneWidget);
+    expect(find.text('E', findRichText: true), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(find.text('E'), findsOneWidget);
+    expect(find.text('E', findRichText: true), findsOneWidget);
   });
 
   testWidgets('markdown tables keep pipes inside inline code cells', (

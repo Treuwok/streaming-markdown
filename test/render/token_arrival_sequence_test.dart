@@ -34,11 +34,11 @@ void main() {
       ),
     );
 
-    expect(find.text('A'), findsOneWidget);
-    expect(find.text('B'), findsNothing);
+    expect(find.text('A', findRichText: true), findsOneWidget);
+    expect(find.text('B', findRichText: true), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 20));
-    expect(find.text('B'), findsOneWidget);
+    expect(find.text('B', findRichText: true), findsOneWidget);
     expect(waitCount, 1);
 
     nodes.value = <MarkdownRenderNode>[
@@ -47,7 +47,7 @@ void main() {
       _node('C', 20),
     ];
     await tester.pump();
-    expect(find.text('C'), findsOneWidget);
+    expect(find.text('C', findRichText: true), findsOneWidget);
     expect(waitCount, 2);
   });
 
@@ -76,18 +76,18 @@ void main() {
     }
 
     await pumpView();
-    expect(find.text('A'), findsOneWidget);
-    expect(find.text('B'), findsNothing);
+    expect(find.text('A', findRichText: true), findsOneWidget);
+    expect(find.text('B', findRichText: true), findsNothing);
 
     paused = true;
     await pumpView();
     await tester.pump(const Duration(milliseconds: 80));
-    expect(find.text('B'), findsNothing);
+    expect(find.text('B', findRichText: true), findsNothing);
 
     paused = false;
     await pumpView();
     await tester.pump(const Duration(milliseconds: 50));
-    expect(find.text('B'), findsOneWidget);
+    expect(find.text('B', findRichText: true), findsOneWidget);
   });
 
   testWidgets('next block can reveal while previous token fade is still active',
@@ -112,11 +112,11 @@ void main() {
       ),
     );
 
-    expect(find.text('Alpha'), findsOneWidget);
-    expect(find.text('Beta'), findsNothing);
+    expect(find.text('Alpha', findRichText: true), findsOneWidget);
+    expect(find.text('Beta', findRichText: true), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 20));
-    expect(find.text('Beta'), findsOneWidget);
+    expect(find.text('Beta', findRichText: true), findsOneWidget);
   });
 
   testWidgets('next block waits when previous streamed block grows', (
@@ -145,7 +145,7 @@ void main() {
       ),
     );
 
-    expect(find.text('Alpha'), findsOneWidget);
+    expect(find.text('Alpha', findRichText: true), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 20));
     nodes.value = <MarkdownRenderNode>[
@@ -154,13 +154,13 @@ void main() {
     ];
     await tester.pump();
 
-    expect(find.text('Next'), findsNothing);
+    expect(find.text('Next', findRichText: true), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 70));
-    expect(find.text('Next'), findsNothing);
+    expect(find.text('Next', findRichText: true), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 20));
-    expect(find.text('Next'), findsOneWidget);
+    expect(find.text('Next', findRichText: true), findsOneWidget);
   });
 
   testWidgets('streaming updates do not indefinitely postpone pending block', (
@@ -190,8 +190,8 @@ void main() {
       ),
     );
 
-    expect(find.text('Hello'), findsOneWidget);
-    expect(find.text('Next'), findsNothing);
+    expect(find.text('Hello', findRichText: true), findsOneWidget);
+    expect(find.text('Next', findRichText: true), findsNothing);
 
     for (int i = 0; i < 12; i++) {
       await tester.pump(const Duration(milliseconds: 10));
@@ -203,7 +203,7 @@ void main() {
     }
 
     await tester.pump(const Duration(milliseconds: 180));
-    expect(find.text('Next'), findsOneWidget);
+    expect(find.text('Next', findRichText: true), findsOneWidget);
   });
 }
 

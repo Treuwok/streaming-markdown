@@ -744,40 +744,42 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     );
   }
 
-  /// Whether a per-token reveal animation exists at all.
+  /// Whether a per-token reveal will actually be painted.
   ///
-  /// This gates [_animatePerWord], which decides whether inline text is split
-  /// into one [WidgetSpan] per whitespace-delimited run. That split is what the
+  /// This is the same condition [_FadeInTokenHost] uses to decide whether to
+  /// animate at all: with a non-positive duration it returns its child
+  /// unchanged, ignoring both the scheduled start and the animation builder.
+  /// Neither [tokenArrivalDelay] nor [tokenAnimationBuilder] can therefore
+  /// produce a reveal on its own — only a positive fade duration can.
+  ///
+  /// It gates [_animatePerWord], which decides whether inline text is split
+  /// into one [WidgetSpan] per whitespace-delimited run. That split is what a
   /// reveal needs — a token can only fade in on its own if it is its own
   /// widget — and it **costs line breaking**: a [WidgetSpan] is atomic to the
   /// line breaker, so once text is split this way the only break opportunities
   /// left are the whitespace runs between the spans. Scripts that do not
-  /// separate words with spaces — CJK, Thai, Lao — therefore lose every break
+  /// separate words with spaces — CJK, Thai, Lao — lose every break
   /// opportunity inside a clause. Paying that with no reveal to show buys
   /// nothing.
-  ///
-  /// [tokenAnimationPaused] is deliberately **not** part of this. Pausing is
-  /// meaningful only when one of the three below is set; on its own it pauses
-  /// nothing, and letting it flip the span topology would make layout depend
-  /// on a flag that [_renderConfigDigest] does not carry — the cached block
-  /// would keep whichever topology it was first built with.
-  bool get _tokenRevealAnimationExists =>
-      tokenArrivalDelay > Duration.zero ||
-      _resolvedTokenFadeInDuration() > Duration.zero ||
-      tokenAnimationBuilder != null;
+  bool get _tokenRevealIsPainted =>
+      _resolvedTokenFadeInDuration() > Duration.zero;
 
   /// Whether inline text should be split into one animated span per word.
   ///
   /// `compacted` alone is not enough: it only says the reveal has *settled*,
   /// not that there was ever a reveal to settle.
   bool _animatePerWord(BuildContext context) =>
-      _tokenRevealAnimationExists &&
-      !_TokenCompactionScope.isCompacted(context);
+      _tokenRevealIsPainted && !_TokenCompactionScope.isCompacted(context);
 
-  /// A paused reveal is still a reveal context, so this one **does** count
-  /// [tokenAnimationPaused] — unlike [_tokenRevealAnimationExists].
+  /// Deliberately wider than [_tokenRevealIsPainted]: this asks whether there
+  /// is a reveal *context* at all, which a pending arrival delay, a custom
+  /// builder, or a pause all establish even when nothing is being painted yet.
+  /// Layout must not use this — see [_tokenRevealIsPainted].
   bool _shouldLockFinalizedSelectionVisual() =>
-      _tokenRevealAnimationExists || tokenAnimationPaused;
+      tokenArrivalDelay > Duration.zero ||
+      _tokenRevealIsPainted ||
+      tokenAnimationBuilder != null ||
+      tokenAnimationPaused;
 
   Map<String, _MarkdownSelectionBlockRange> _buildSelectionBlockRanges(
     List<MarkdownRenderNode> blocks,
