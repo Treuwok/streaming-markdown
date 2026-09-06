@@ -25,39 +25,28 @@ extension _StreamingMarkdownInlineTokenSpans on StreamingMarkdownRenderView {
     Color? sourceSelectionColor,
     VoidCallback? onTap,
   }) {
+    // Three things need one widget per token, and they are independent of each
+    // other: the reveal animation (a token can only fade in on its own if it
+    // is its own widget), the debug colouring, and a tap target.
+    //
+    // Everything else must reach the `TextSpan` path below. That is the only
+    // one the line breaker can break inside: a `WidgetSpan` is atomic to it,
+    // so text routed around this path loses every break opportunity that is
+    // not a space between spans — which, for scripts that do not separate
+    // words with spaces, means all of them.
     final bool preserveStaticTokenLayout =
         !animatePerWord && fadeDuration > Duration.zero;
-    if (!animatePerWord && !preserveStaticTokenLayout && onTap == null) {
+    final bool splitPerToken = animatePerWord ||
+        preserveStaticTokenLayout ||
+        debugTokenHighlight ||
+        onTap != null;
+    if (!splitPerToken) {
       spans.addAll(
         _sourceHighlightedTextSpans(
           text,
           style,
           sourceSelectionRange,
           sourceSelectionColor,
-        ),
-      );
-      return startTokenIndex + _inlineWordCount(text);
-    }
-    if (!animatePerWord && !preserveStaticTokenLayout) {
-      final Widget textWidget =
-          sourceSelectionRange == null || sourceSelectionColor == null
-              ? Text(text, style: style)
-              : Text.rich(
-                  TextSpan(
-                    style: style,
-                    children: _sourceHighlightedTextSpans(
-                      text,
-                      style,
-                      sourceSelectionRange,
-                      sourceSelectionColor,
-                    ),
-                  ),
-                );
-      spans.add(
-        WidgetSpan(
-          alignment: PlaceholderAlignment.baseline,
-          baseline: TextBaseline.alphabetic,
-          child: GestureDetector(onTap: onTap, child: textWidget),
         ),
       );
       return startTokenIndex + _inlineWordCount(text);

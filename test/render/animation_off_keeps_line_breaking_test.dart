@@ -46,4 +46,48 @@ void main() {
 
     expect(whileStreaming, afterSettling);
   });
+
+  testWidgets('a link is still tappable with the animation off',
+      (WidgetTester t) async {
+    // A tap target needs one widget per token for its own reason, unrelated to
+    // the animation. Drop that reason and the label silently becomes ordinary
+    // text: it still renders, still breaks correctly, and no longer responds.
+    String? tapped;
+    await t.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: StreamingMarkdownRenderView(
+          nodes: <MarkdownRenderNode>[_p('see [the docs](https://x.test) now')],
+          padding: EdgeInsets.zero,
+          onLinkTap: (String url) => tapped = url,
+        ),
+      ),
+    ));
+    await t.pump();
+
+    await t.tap(find.text('docs'));
+    await t.pump();
+
+    expect(tapped, 'https://x.test');
+  });
+
+  testWidgets('debug token colours still render with the animation off',
+      (WidgetTester t) async {
+    // The debug colouring paints one box per token, so it needs the per-token
+    // split for its own reason — unrelated to the animation being on.
+    await t.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: StreamingMarkdownRenderView(
+          nodes: <MarkdownRenderNode>[_p('hello world debug')],
+          padding: EdgeInsets.zero,
+          debugTokenHighlight: true,
+        ),
+      ),
+    ));
+    await t.pump();
+
+    final int boxes = find.byType(Container).evaluate().where((Element e) {
+      return (e.widget as Container).decoration is BoxDecoration;
+    }).length;
+    expect(boxes, 3);
+  });
 }
