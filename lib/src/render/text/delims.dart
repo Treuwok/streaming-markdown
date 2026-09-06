@@ -71,10 +71,21 @@ extension _StreamingMarkdownDelimiterParsing on StreamingMarkdownRenderView {
   }
 }
 
+/// [honoursBackslashEscapes] says whether a `\\` before the closing run makes
+/// it literal instead of closing. REQUIRED, and deliberately without a default.
+///
+/// The spec does not give one answer for every delimiter — "Backslash escapes
+/// do not work in code blocks, code spans, autolinks, or raw HTML" — so a code
+/// span really does end at the `` ` `` in `` \` ``, while emphasis really does
+/// not end at the `*` in `\*`. A default would answer that silently for a
+/// delimiter nobody has considered yet, which is exactly how the closing half
+/// of this went missing after the opening half was fixed (#2356 → #2438).
+/// Answering is now the cost of adding a delimiter.
 _DelimitedMatch? _matchDelimited(
   String text,
   int start,
   String delimiter, {
+  required bool honoursBackslashEscapes,
   bool allowUnclosedTail = false,
 }) {
   if (!text.startsWith(delimiter, start)) {
@@ -83,7 +94,9 @@ _DelimitedMatch? _matchDelimited(
   if (!_canOpenDelimiter(text, start, delimiter)) {
     return null;
   }
-  final int endStart = text.indexOf(delimiter, start + delimiter.length);
+  final int endStart = honoursBackslashEscapes
+      ? _findUnescapedDelimiter(text, delimiter, start + delimiter.length)
+      : text.indexOf(delimiter, start + delimiter.length);
   if (endStart == -1) {
     if (!allowUnclosedTail) {
       return null;
@@ -125,7 +138,8 @@ _InlineImageMatch? _matchInlineImageAt(String text, int start) {
   if (!text.startsWith('![', start)) {
     return null;
   }
-  final int closeBracket = text.indexOf(']', start + 2);
+  // Same reading as the link scanner below: an escaped closer is literal.
+  final int closeBracket = _findUnescapedDelimiter(text, ']', start + 2);
   if (closeBracket == -1 || closeBracket + 1 >= text.length) {
     return null;
   }
@@ -133,19 +147,39 @@ _InlineImageMatch? _matchInlineImageAt(String text, int start) {
   if (text[closeBracket + 1] != '(') {
     return null;
   }
-  final int closeParen = text.indexOf(')', closeBracket + 2);
+  final int closeParen = _findUnescapedDelimiter(text, ')', closeBracket + 2);
   if (closeParen == -1) {
     return null;
   }
 
+  // NOT unescaped, and that is a deliberate retreat from an earlier version of
+  // this change. An image's description is INLINE CONTENT — the same grammar as
+  // a link label — so a `\]` in it should become `]`, but a `\*` inside a code
+  // span should stay a backslash, because the spec exempts code spans from
+  // escapes. A string-level unescape cannot tell those apart: it turned
+  // `` ![`a\*b`](x) `` into `` `a*b` ``, corrupting an alt that was correct
+  // before this change.
+  //
+  // The right treatment is to project the alt through the inline parser, which
+  // already knows both rules — that is what the link LABEL beside it does, and
+  // why the label has always been correct. The parser is even in scope at the
+  // call site; what is missing is a token-to-plain-text projection at this
+  // layer, and the existing one lives in the render layer behind a footnote
+  // numbering map. That is a shape decision, not a line: tracked as
+  // drwu-ai-assitant#2569.
+  //
+  // So the alt stays as written. Against `main` that adds no new failure: an
+  // `![alt \] x](url)` there did not parse as an image at all and the whole
+  // markup, URL included, was painted as prose. This change makes it an image;
+  // its alt carrying a backslash is the pre-existing gap above, not a new one.
   final String alt = text.substring(start + 2, closeBracket).trim();
   final String rawUrl = text.substring(closeBracket + 2, closeParen).trim();
   if (rawUrl.isEmpty) {
     return null;
   }
 
-  final String url = _stripEnclosingAngles(
-    rawUrl.split(RegExp(r'\s+')).first,
+  final String url = _unescapeBackslashEscapes(
+    _stripEnclosingAngles(rawUrl.split(RegExp(r'\s+')).first),
   );
   return _InlineImageMatch(alt: alt, url: url, end: closeParen + 1);
 }
@@ -169,7 +203,10 @@ _InlineLinkScan _scanInlineLinkAt(
     return const _InlineLinkScan.notALink();
   }
 
-  final int closeBracket = text.indexOf(']', start + 1);
+  // An `\]` in the label is a literal bracket, not where the label ends.
+  // Reading it as the end produced a short label that never matched a
+  // destination, so the raw `[...](https://…)` went on screen, URL included.
+  final int closeBracket = _findUnescapedDelimiter(text, ']', start + 1);
   if (closeBracket == -1) {
     // Released once no more source can arrive — deliberately NOT on "a newline
     // already ended this line".
@@ -202,7 +239,7 @@ _InlineLinkScan _scanInlineLinkAt(
     final bool isImageCandidate = start > 0 && text.codeUnitAt(start - 1) == 33;
     final bool opensAnUnclosedDestination = closeBracket + 1 < text.length &&
         text[closeBracket + 1] == '(' &&
-        text.indexOf(')', closeBracket + 2) == -1;
+        _findUnescapedDelimiter(text, ')', closeBracket + 2) == -1;
     return isImageCandidate && opensAnUnclosedDestination
         ? const _InlineLinkScan.incompleteDestination()
         : const _InlineLinkScan.notALink();
@@ -223,7 +260,7 @@ _InlineLinkScan _scanInlineLinkAt(
   }
 
   if (closeBracket + 1 < text.length && text[closeBracket + 1] == '(') {
-    final int closeParen = text.indexOf(')', closeBracket + 2);
+    final int closeParen = _findUnescapedDelimiter(text, ')', closeBracket + 2);
     if (closeParen == -1) {
       // `[label](https://…` with no closing paren yet — the destination is
       // mid-flight. This is the leak: painting the source here shows the URL.
@@ -243,19 +280,28 @@ _InlineLinkScan _scanInlineLinkAt(
       // the destination as ordinary text.
       return const _InlineLinkScan.incompleteDestination();
     }
-    final String url = _stripEnclosingAngles(raw.split(RegExp(r'\s+')).first);
+    final String url = _unescapeBackslashEscapes(
+      _stripEnclosingAngles(raw.split(RegExp(r'\s+')).first),
+    );
     return _InlineLinkScan.matched(
       _InlineLinkMatch(label: label, url: url, end: closeParen + 1),
     );
   }
 
   if (closeBracket + 1 < text.length && text[closeBracket + 1] == '[') {
-    final int closeRef = text.indexOf(']', closeBracket + 2);
+    final int closeRef = _findUnescapedDelimiter(text, ']', closeBracket + 2);
     if (closeRef == -1) {
       return sourceComplete
           ? const _InlineLinkScan.notALink()
           : const _InlineLinkScan.incompleteDestination();
     }
+    // Deliberately NOT unescaped, and the reason is not symmetry: the
+    // definition parser does not read an escaped `]` either, so a key like
+    // `[r\]x]` never produces a definition to match against. Measured both
+    // ways — with this search escape-aware and without — and the screen is
+    // identical: the reference stays literal. So this is a pre-existing gap
+    // that the change neither creates nor closes, and unescaping the key here
+    // alone would only make the two halves disagree about what the key IS.
     final String rawKey = text.substring(closeBracket + 2, closeRef).trim();
     final String key = _normalizeReferenceKey(
       rawKey.isEmpty ? label : rawKey,
