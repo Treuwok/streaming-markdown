@@ -744,12 +744,38 @@ class StreamingMarkdownRenderView extends StatelessWidget {
     );
   }
 
-  bool _shouldLockFinalizedSelectionVisual() {
-    return tokenArrivalDelay > Duration.zero ||
-        _resolvedTokenFadeInDuration() > Duration.zero ||
-        tokenAnimationBuilder != null ||
-        tokenAnimationPaused;
-  }
+  /// Whether per-token reveal animation is actually switched on.
+  ///
+  /// This is the single place that answers that question. It decides two
+  /// things that must not disagree: whether the finalized selection visual is
+  /// locked, and — via [_animatePerWord] — whether inline text is split into
+  /// one [WidgetSpan] per whitespace-delimited run.
+  ///
+  /// That split is what the reveal animation needs: a token can only fade in
+  /// on its own if it is its own widget. It also **costs line breaking**. A
+  /// [WidgetSpan] is atomic to the line breaker, so once text is split this
+  /// way the only remaining break opportunities are the whitespace runs
+  /// between the spans. Scripts that do not separate words with spaces — CJK,
+  /// Thai, Lao — therefore lose every break opportunity inside a clause, and a
+  /// clause that does not fit in the space left on the current line is pushed
+  /// to the next one whole.
+  ///
+  /// Paying that with the animation switched off buys nothing, so this getter
+  /// gates the split as well.
+  bool get _tokenAnimationEnabled =>
+      tokenArrivalDelay > Duration.zero ||
+      _resolvedTokenFadeInDuration() > Duration.zero ||
+      tokenAnimationBuilder != null ||
+      tokenAnimationPaused;
+
+  /// Whether inline text should be split into one animated span per word.
+  ///
+  /// `compacted` alone is not enough: it only says the reveal has *settled*,
+  /// not that there was ever a reveal to settle. See [_tokenAnimationEnabled].
+  bool _animatePerWord(BuildContext context) =>
+      _tokenAnimationEnabled && !_TokenCompactionScope.isCompacted(context);
+
+  bool _shouldLockFinalizedSelectionVisual() => _tokenAnimationEnabled;
 
   Map<String, _MarkdownSelectionBlockRange> _buildSelectionBlockRanges(
     List<MarkdownRenderNode> blocks,

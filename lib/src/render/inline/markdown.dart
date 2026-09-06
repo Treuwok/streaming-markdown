@@ -34,7 +34,7 @@ extension _StreamingMarkdownInlineMarkdownRenderer
         Theme.of(context).textTheme.bodyLarge ??
         const TextStyle(fontSize: 16);
     final bool compacted = _TokenCompactionScope.isCompacted(context);
-    final bool animatePerWord = !compacted;
+    final bool animatePerWord = _animatePerWord(context);
     final _InlineParseResult scan = _inlineParserFor(
       linkReferences,
       withholdIncompleteDestinations: withholdIncompleteDestinations,

@@ -107,7 +107,7 @@ extension _StreamingMarkdownInlineSpanRenderer on StreamingMarkdownRenderView {
           tokenStaggerDelay: tokenStaggerDelay,
           tokenScheduleOrigin: tokenScheduleOrigin,
           tokenAnimationBuilder: tokenAnimationBuilder,
-          animatePerWord: !compacted,
+          animatePerWord: _animatePerWord(context),
           onTap: enableTextSelection
               ? null
               : () => _onLinkPressed(context, token.linkUrl!),
@@ -124,7 +124,7 @@ extension _StreamingMarkdownInlineSpanRenderer on StreamingMarkdownRenderView {
         tokenStaggerDelay: tokenStaggerDelay,
         tokenScheduleOrigin: tokenScheduleOrigin,
         tokenAnimationBuilder: tokenAnimationBuilder,
-        animatePerWord: !compacted,
+        animatePerWord: _animatePerWord(context),
       );
     }
   }

@@ -492,9 +492,10 @@ void main() {
       expect(find.byType(SelectionArea), findsOneWidget);
       expect(find.byType(SelectableRegion), findsOneWidget);
       expect(_inlineSelectionProxyCount(tester), greaterThanOrEqualTo(1));
-      expect(find.text('Prefix'), findsOneWidget);
-      expect(find.text('bold'), findsOneWidget);
-      expect(find.text('suffix'), findsOneWidget);
+      expect(
+        find.text('Prefix bold suffix', findRichText: true),
+        findsOneWidget,
+      );
     });
 
     testWidgets('pixel parity smoke: same render size with/without selection', (

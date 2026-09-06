@@ -292,10 +292,19 @@ Setext title
     );
     watch.stop();
 
-    expect(find.text('Instant'), findsOneWidget);
-    expect(find.text('Short'), findsOneWidget);
-    expect(find.text('markdown'), findsOneWidget);
-    expect(find.text('now.'), findsOneWidget);
+    // Assert the painted text, not `find.text('Instant')`. That finder only
+    // matches a `Text` widget, so it used to depend on each word being split
+    // into one of its own — which now happens only when the reveal animation
+    // is on. Whole-string equality is also stricter than the four word probes
+    // it replaces: it fails on missing, duplicated, or re-ordered content.
+    expect(
+      find
+          .byType(RichText)
+          .evaluate()
+          .map((Element e) => (e.widget as RichText).text.toPlainText())
+          .join('|'),
+      'Instant|Short markdown should show now.',
+    );
     debugPrint(
       'fromMarkdown zero-duration first pump: '
       '${watch.elapsedMicroseconds / 1000} ms',
@@ -2764,9 +2773,15 @@ class Greeter {
       ),
     );
 
-    final Text text = tester.widget<Text>(find.text('italic'));
-    expect(text.style?.fontStyle, FontStyle.italic);
-    expect(text.style?.decoration, isNot(TextDecoration.underline));
+    final RichText rich =
+        tester.widget<RichText>(find.byType(RichText).first);
+    final TextSpan span = rich.text as TextSpan;
+    final TextStyle? style = span.children == null
+        ? span.style
+        : (span.children!.single as TextSpan).style;
+    expect(rich.text.toPlainText(), 'italic');
+    expect(style?.fontStyle, FontStyle.italic);
+    expect(style?.decoration, isNot(TextDecoration.underline));
   });
 
   testWidgets('setext headings hide delimiter lines from content and raw', (
@@ -3278,7 +3293,7 @@ Các công thức Laplace:
     final Offset checkboxCenter = tester.getCenter(
       find.byIcon(Icons.check_box_outline_blank),
     );
-    final Offset textCenter = tester.getCenter(find.text('Open'));
+    final Offset textCenter = tester.getCenter(find.text('Open task', findRichText: true));
 
     expect((checkboxCenter.dy - textCenter.dy).abs(), lessThanOrEqualTo(2));
   });
