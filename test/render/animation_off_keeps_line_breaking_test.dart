@@ -1,5 +1,7 @@
 library;
 import 'package:animated_streaming_markdown/animated_streaming_markdown.dart';
+import 'dart:ui' show SemanticsAction;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -47,11 +49,14 @@ void main() {
     expect(whileStreaming, afterSettling);
   });
 
-  testWidgets('a link is still tappable with the animation off',
+  testWidgets('a link label stays one tap target with the animation off',
       (WidgetTester t) async {
-    // A tap target needs one widget per token for its own reason, unrelated to
-    // the animation. Drop that reason and the label silently becomes ordinary
-    // text: it still renders, still breaks correctly, and no longer responds.
+    // A tap target needs the opposite of what the reveal needs. Split the
+    // label into one detector per word and two things go: the space between
+    // the words stops being a hit area, and accessibility services see several
+    // actions instead of one carrying the whole label. Both need the pieces to
+    // share an ancestor widget, which separate spans cannot have.
+    final SemanticsHandle handle = t.ensureSemantics();
     String? tapped;
     await t.pumpWidget(MaterialApp(
       home: Scaffold(
@@ -64,10 +69,19 @@ void main() {
     ));
     await t.pump();
 
-    await t.tap(find.text('docs'));
-    await t.pump();
+    // The whole label, not one of its words: this is the finder that goes
+    // looking for a single tap target.
+    final Finder label = find.text('the docs');
+    expect(label, findsOneWidget);
+    expect(
+      t.getSemantics(label).getSemanticsData().hasAction(SemanticsAction.tap),
+      isTrue,
+    );
 
+    await t.tap(label);
+    await t.pump();
     expect(tapped, 'https://x.test');
+    handle.dispose();
   });
 
   testWidgets('debug token colours still render with the animation off',
