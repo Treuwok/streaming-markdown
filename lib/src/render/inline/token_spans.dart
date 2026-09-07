@@ -25,28 +25,63 @@ extension _StreamingMarkdownInlineTokenSpans on StreamingMarkdownRenderView {
     Color? sourceSelectionColor,
     VoidCallback? onTap,
   }) {
-    // Three things need one widget per token, and they are independent of each
-    // other: the reveal animation (a token can only fade in on its own if it
-    // is its own widget), the debug colouring, and a tap target.
+    // Two things need one widget **per token**, and they are independent of
+    // each other: the reveal animation (a token can only fade in on its own if
+    // it is its own widget) and the debug colouring.
     //
-    // Everything else must reach the `TextSpan` path below. That is the only
-    // one the line breaker can break inside: a `WidgetSpan` is atomic to it,
-    // so text routed around this path loses every break opportunity that is
-    // not a space between spans — which, for scripts that do not separate
-    // words with spaces, means all of them.
+    // A tap target is **not** one of them — it needs the opposite. Splitting a
+    // label into one gesture detector per word loses the space between the
+    // words as a hit area, and exposes the link to accessibility services as
+    // several separate actions instead of one action carrying the whole label.
+    // Both need the pieces to share an ancestor widget, which is the one thing
+    // separate spans cannot have. So a tappable run stays one widget.
+    //
+    // Everything else reaches the `TextSpan` path below. That is the only one
+    // the line breaker can break inside: a `WidgetSpan` is atomic to it, so
+    // text routed around this path loses every break opportunity that is not a
+    // space between spans — which, for scripts that do not separate words with
+    // spaces, means all of them. That cost is why the path is the default and
+    // the two reasons above are the exceptions.
     final bool preserveStaticTokenLayout =
         !animatePerWord && fadeDuration > Duration.zero;
-    final bool splitPerToken = animatePerWord ||
-        preserveStaticTokenLayout ||
-        debugTokenHighlight ||
-        onTap != null;
-    if (!splitPerToken) {
+    final bool splitPerToken =
+        animatePerWord || preserveStaticTokenLayout || debugTokenHighlight;
+
+    if (!splitPerToken && onTap == null) {
       spans.addAll(
         _sourceHighlightedTextSpans(
           text,
           style,
           sourceSelectionRange,
           sourceSelectionColor,
+        ),
+      );
+      return startTokenIndex + _inlineWordCount(text);
+    }
+
+    if (!splitPerToken) {
+      // One widget for the whole run: one hit area, one semantics action, one
+      // label. The run cannot break internally — see the comment above for why
+      // that is the side we take here.
+      final Widget textWidget =
+          sourceSelectionRange == null || sourceSelectionColor == null
+              ? Text(text, style: style)
+              : Text.rich(
+                  TextSpan(
+                    style: style,
+                    children: _sourceHighlightedTextSpans(
+                      text,
+                      style,
+                      sourceSelectionRange,
+                      sourceSelectionColor,
+                    ),
+                  ),
+                );
+      spans.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.baseline,
+          baseline: TextBaseline.alphabetic,
+          child: GestureDetector(onTap: onTap, child: textWidget),
         ),
       );
       return startTokenIndex + _inlineWordCount(text);
