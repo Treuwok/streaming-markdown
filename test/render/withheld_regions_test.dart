@@ -66,13 +66,17 @@ String _painted(WidgetTester tester) {
 
 void main() {
   group('analyzeWithheldMarkdownRegions', () {
-    test('reports the boundary at the opener of an unresolved link', () {
+    test('reports the boundary after the label of an unresolved link', () {
       const String source = 'Before [help](https://secret.example';
       final WithheldMarkdownRegions regions =
           analyzeWithheldMarkdownRegionsOfSource(source);
-      expect(regions.safeEndCodeUnits, source.indexOf('['),
-          reason: 'the whole candidate is held back from its opener, so a '
-              'later `](` cannot retract an already-painted label');
+      expect(regions.safeEndCodeUnits, source.indexOf(']'),
+          reason: 'the label is the author\'s text and is painted while the '
+              'destination arrives; only `](…` is held back');
+      expect(regions.visibleText, 'Before help');
+      expect(regions.hiddenCodeUnitRanges, <(int, int)>[(7, 8)],
+          reason: 'the `[` paints nothing, and a selection rebuilt from the '
+              'source must not carry it');
     });
 
     test('reports nothing for a source with no unresolved destination', () {
@@ -87,8 +91,8 @@ void main() {
       // The failure this pins is silent: every offset here is identical under
       // both units for ASCII, so an ASCII-only fixture cannot see it. The
       // block model calls these offsets `startCodeUnit` and they are not.
-      const String prefix = '先看這裡 ';
-      const String source = '$prefix[help](https://secret.example';
+      const String prefix = '先看這裡 [說明';
+      const String source = '$prefix](https://secret.example';
       final WithheldMarkdownRegions regions =
           analyzeWithheldMarkdownRegionsOfSource(source);
       expect(regions.safeEndCodeUnits, prefix.length);
@@ -375,23 +379,28 @@ void main() {
     test('settles prose once the source is final, but never a destination',
         () {
       // The two halves of the same call. `[not a link` has no destination in
-      // it, so holding it back after the stream ends would hide the author's
-      // own words; `[x](https://…` does, and the stream ending does not make
+      // it: mid-stream it is a candidate whose label is already painted, and
+      // once the stream ends it is plain prose, bracket included.
+      // `[x](https://…` does have one, and the stream ending does not make
       // showing it correct.
       const String prose = 'see [not a link';
-      expect(
-        analyzeWithheldMarkdownRegionsOfSource(prose, sourceComplete: true)
-            .safeEndCodeUnits,
-        prose.length,
-      );
-      expect(analyzeWithheldMarkdownRegionsOfSource(prose).safeEndCodeUnits,
-          prose.indexOf('['));
+      final WithheldMarkdownRegions settled =
+          analyzeWithheldMarkdownRegionsOfSource(prose, sourceComplete: true);
+      expect(settled.safeEndCodeUnits, prose.length);
+      expect(settled.visibleText, prose);
+      final WithheldMarkdownRegions streaming =
+          analyzeWithheldMarkdownRegionsOfSource(prose);
+      expect(streaming.safeEndCodeUnits, prose.length);
+      expect(streaming.visibleText, 'see not a link');
 
       const String truncated = 'see [x](https://secret.example';
       expect(
         analyzeWithheldMarkdownRegionsOfSource(truncated, sourceComplete: true)
             .safeEndCodeUnits,
         truncated.indexOf('['),
+        reason: 'a finished source no longer paints the label early: the '
+            'scanned text can end inside the destination, and only a boundary '
+            'keeps the rest of it off the screen',
       );
     });
 
@@ -403,15 +412,17 @@ void main() {
 
       // A closed reference form carries no destination — the URL lives in the
       // definition block — so it shows as the author's text and a definition
-      // arriving later upgrades it. Only an OPEN candidate is held back, where
-      // a late `](` would retract a label that was already painted.
+      // arriving later upgrades it. Only an OPEN candidate holds anything
+      // back, and only what follows its label.
       const String unresolved = 'see [help][ref]';
       expect(analyzeWithheldMarkdownRegionsOfSource(unresolved).safeEndCodeUnits,
           unresolved.length);
 
       const String open = 'see [help';
-      expect(analyzeWithheldMarkdownRegionsOfSource(open).safeEndCodeUnits,
-          open.indexOf('['));
+      final WithheldMarkdownRegions opened =
+          analyzeWithheldMarkdownRegionsOfSource(open);
+      expect(opened.safeEndCodeUnits, open.length);
+      expect(opened.visibleText, 'see help');
     });
   });
 

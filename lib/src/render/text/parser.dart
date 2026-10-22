@@ -18,7 +18,8 @@ final class _InlineParseResult {
   /// destination had not arrived yet; `null` when the whole text was consumed.
   final int? withheldFrom;
 
-  /// Code-unit ranges the scan recognised as raw HTML and did not draw.
+  /// Code-unit ranges the scan recognised and did not draw: raw HTML, and the
+  /// syntax around a link label painted before its destination arrived.
   final List<(int start, int end)> hiddenRanges;
 
   /// The part of [text] these tokens came from.

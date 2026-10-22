@@ -186,6 +186,35 @@ void main() {
     });
   }
 
+  // The loop above reads every fixture as finished source. These are not
+  // finished: a link still streaming, where the label is painted and the rest
+  // is held back. Same question, asked of both sides mid-stream.
+  const List<(String, String)> streaming = <(String, String)>[
+    ('an unfinished link paints its label and no bracket',
+        'see [資料來源](https://secret.example'),
+    ('a label still arriving', 'see [資料來'),
+    ('a label whose bracket ends the chunk', 'see [label]'),
+    ('a bracket with nothing after it yet', '['),
+    ('an unfinished image paints none of it',
+        'see ![alt](https://secret.example'),
+  ];
+  for (final (String name, String source) in streaming) {
+    testWidgets('the report matches the screen mid-stream: $name',
+        (tester) async {
+      final List<MarkdownRenderNode> blocks =
+          MarkdownSyncParser.parseMarkdown(source).blocks;
+      await tester.pumpWidget(_host(blocks));
+      await tester.pump();
+      final WithheldMarkdownRegions report = analyzeWithheldMarkdownRegions(
+        source,
+        blocks: blocks,
+        suppressRawHtml: true,
+      );
+      expect(_chars(report.visibleText), _paintedChars(tester),
+          reason: 'source: $source');
+    });
+  }
+
   group('a raw-text element reports nothing, all four of them', () {
     // `script`, `style` and `pre` were suppressed; `textarea` was not, and
     // reported its contents as visible text while the renderer paints none of
@@ -270,7 +299,9 @@ void main() {
       '- first\n- [link](https://unfinished',
       suppressRawHtml: true,
     );
-    expect(report.visibleText, 'first');
+    // `link` is the second item's label, painted while its destination is
+    // still arriving; the destination is what the boundary holds back.
+    expect(report.visibleText, 'first\nlink');
   });
 
   testWidgets('every reported character still points at itself', (
