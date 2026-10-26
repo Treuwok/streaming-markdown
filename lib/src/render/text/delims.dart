@@ -193,6 +193,10 @@ _InlineImageMatch? _matchInlineImageAt(String text, int start) {
 /// A destination is only ever a candidate while the source keeps growing, so
 /// every incomplete arm below is conditioned on being at the end of what has
 /// been received.
+///
+/// The label is not part of what would be hidden, so every incomplete arm that
+/// knows where the label ends says so ([_InlineLinkScan.labelEnd]) and the
+/// caller paints it.
 _InlineLinkScan _scanInlineLinkAt(
   String text,
   int start, {
@@ -202,6 +206,18 @@ _InlineLinkScan _scanInlineLinkAt(
   if (!text.startsWith('[', start)) {
     return const _InlineLinkScan.notALink();
   }
+
+  // Painting the label early is only for a candidate that can still arrive.
+  // Once the source is complete a destination that never closed stays held
+  // back from the `[`: hiding it in place is not enough, because the text this
+  // scan was handed can end inside the destination (an emphasis closer or a
+  // table pipe in the URL), and the rest of it would be painted by whatever
+  // scans next. Two more shapes keep their label back because the finished
+  // construct does not paint it as text: an image paints no alt, and a `[^`
+  // footnote turns into its number.
+  final bool isImageCandidate = start > 0 && text.codeUnitAt(start - 1) == 33;
+  final bool labelMayShow =
+      !sourceComplete && !isImageCandidate && !text.startsWith('[^', start);
 
   // An `\]` in the label is a literal bracket, not where the label ends.
   // Reading it as the end produced a short label that never matched a
@@ -224,7 +240,8 @@ _InlineLinkScan _scanInlineLinkAt(
     // releases; the cost of the other direction is a URL on screen.
     return sourceComplete
         ? const _InlineLinkScan.notALink()
-        : const _InlineLinkScan.incompleteDestination();
+        : _InlineLinkScan.incompleteDestination(
+            labelMayShow ? text.length : null);
   }
 
   final String label = text.substring(start + 1, closeBracket);
@@ -236,7 +253,6 @@ _InlineLinkScan _scanInlineLinkAt(
     // Only for an IMAGE though. An empty alt is valid for a completed image,
     // but this parser rejects empty LINK labels outright — so without the `!`
     // check, ordinary prose like `see [](just text` was truncated at the `[`.
-    final bool isImageCandidate = start > 0 && text.codeUnitAt(start - 1) == 33;
     final bool opensAnUnclosedDestination = closeBracket + 1 < text.length &&
         text[closeBracket + 1] == '(' &&
         _findUnescapedDelimiter(text, ')', closeBracket + 2) == -1;
@@ -266,7 +282,8 @@ _InlineLinkScan _scanInlineLinkAt(
       // mid-flight. This is the leak: painting the source here shows the URL.
       // Never released by a newline (see above), and not by the source ending
       // either — the destination is right there in the text.
-      return const _InlineLinkScan.incompleteDestination();
+      return _InlineLinkScan.incompleteDestination(
+          labelMayShow ? closeBracket : null);
     }
 
     final String raw = text.substring(closeBracket + 2, closeParen).trim();
@@ -278,7 +295,8 @@ _InlineLinkScan _scanInlineLinkAt(
       // inside an angle-bracketed destination, so the destination really runs
       // past it. Treating the short reading as a match would paint the rest of
       // the destination as ordinary text.
-      return const _InlineLinkScan.incompleteDestination();
+      return _InlineLinkScan.incompleteDestination(
+          labelMayShow ? closeBracket : null);
     }
     final String url = _unescapeBackslashEscapes(
       _stripEnclosingAngles(raw.split(RegExp(r'\s+')).first),
@@ -293,7 +311,8 @@ _InlineLinkScan _scanInlineLinkAt(
     if (closeRef == -1) {
       return sourceComplete
           ? const _InlineLinkScan.notALink()
-          : const _InlineLinkScan.incompleteDestination();
+          : _InlineLinkScan.incompleteDestination(
+              labelMayShow ? closeBracket : null);
     }
     // Deliberately NOT unescaped, and the reason is not symmetry: the
     // definition parser does not read an escaped `]` either, so a key like
@@ -312,8 +331,8 @@ _InlineLinkScan _scanInlineLinkAt(
       // destination — the URL lives in the definition, which is a block of its
       // own — so this is the author's text and it shows. A definition arriving
       // later upgrades it to a link; that rebuild is expected, unlike the one
-      // a late `](` would cause, which is why an OPEN candidate is held back
-      // and a closed one is not.
+      // a late `](` would cause, which is why an OPEN candidate holds back
+      // everything after its label and a closed one holds back nothing.
       return const _InlineLinkScan.notALink();
     }
     return _InlineLinkScan.matched(

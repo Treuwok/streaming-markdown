@@ -1,5 +1,17 @@
 ## Unreleased
 
+- With `withholdIncompleteDestinations`, a streaming link's label is painted as
+  it arrives and only what follows it is held back — previously the whole
+  `[label](…` waited for the destination and appeared in one jump. Once its
+  `]` is in, the pending label is laid out as the link it becomes (one
+  unbreakable piece), so it does not move when the `)` arrives, and it keeps
+  its tokens, so a fade-in already played is not restarted. Image alt text,
+  `[^` footnote shapes and labels whose `]` sits inside a code span are still
+  held back from the `[`, as is any candidate once
+  `sourceComplete` is set. `WithheldMarkdownRegions` follows: the boundary
+  moves from the `[` to the end of the label, and the `[` is reported as a
+  hidden range.
+
 - **Breaking.** `MarkdownRenderNode.startByte` / `endByte` are now
   `startCodeUnit` / `endCodeUnit`, and always hold UTF-16 code units — the unit
   a Dart `String` is indexed in, so `source.substring(startCodeUnit,

@@ -19,6 +19,9 @@ final class WithheldMarkdownRegions {
   /// Length of the longest prefix of the source that can be drawn without
   /// showing a destination that has not arrived yet.
   ///
+  /// For a link still streaming that is the end of its label: the label is
+  /// drawn, the `](…` after it is not.
+  ///
   /// UTF-16 code units, the unit Dart's `String` is indexed in — not bytes.
   final int safeEndCodeUnits;
 

@@ -222,6 +222,7 @@ extension _StreamingMarkdownInlineMarkdownRenderer
         tokenScheduleOrigin: tokenScheduleOrigin,
         tokenAnimationBuilder: tokenAnimationBuilder,
         animatePerWord: animatePerWord,
+        keepWhole: token.isLinkCandidate,
       );
     }
 

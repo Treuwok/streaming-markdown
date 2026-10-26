@@ -125,6 +125,9 @@ extension _StreamingMarkdownInlineSpanRenderer on StreamingMarkdownRenderView {
         tokenScheduleOrigin: tokenScheduleOrigin,
         tokenAnimationBuilder: tokenAnimationBuilder,
         animatePerWord: _animatePerWord(context),
+        // Whole only where the finished link would be: here a link is one
+        // tap target only while selection is off.
+        keepWhole: token.isLinkCandidate && !enableTextSelection,
       );
     }
   }

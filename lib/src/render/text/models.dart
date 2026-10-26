@@ -118,15 +118,33 @@ enum _InlineLinkScanKind { matched, notALink, incompleteDestination }
 
 class _InlineLinkScan {
   const _InlineLinkScan.matched(_InlineLinkMatch this.match)
-      : kind = _InlineLinkScanKind.matched;
+      : kind = _InlineLinkScanKind.matched,
+        labelEnd = null;
   const _InlineLinkScan.notALink()
       : kind = _InlineLinkScanKind.notALink,
-        match = null;
-  const _InlineLinkScan.incompleteDestination()
+        match = null,
+        labelEnd = null;
+  const _InlineLinkScan.incompleteDestination([this.labelEnd])
       : kind = _InlineLinkScanKind.incompleteDestination,
         match = null;
 
   final _InlineLinkScanKind kind;
+
+  /// For an [_InlineLinkScanKind.incompleteDestination]: where the label
+  /// stops, exclusive — the closing `]`, or the end of the text while the `]`
+  /// has not arrived. Null when the label must be held back with the rest.
+  ///
+  /// The label is text the author wrote to be read; only the destination is
+  /// metadata nobody is meant to see. Withholding both from the `[` made a
+  /// streamed label appear in one jump once its URL finished. Reporting where
+  /// the label ends lets the caller paint it and hold back only what follows.
+  ///
+  /// Null is the answer once the source is complete (see the scanner), and
+  /// wherever the reading of the label itself is in doubt or would be
+  /// retracted: an image's alt text (an image paints no alt), a `[^` footnote
+  /// shape (it becomes a number), a label whose `]` sits inside a code span
+  /// (that `]` is not where the label ends).
+  final int? labelEnd;
   final _InlineLinkMatch? match;
 }
 
@@ -243,6 +261,7 @@ class _InlineToken {
     required this.sourceMarkdown,
     required this.visibleSourceStart,
     this.linkUrl,
+    this.isLinkCandidate = false,
   })  : altText = '',
         imageUrl = null,
         footnoteReferenceId = null,
@@ -257,6 +276,7 @@ class _InlineToken {
   })  : text = '',
         style = const _InlineStyle(),
         linkUrl = null,
+        isLinkCandidate = false,
         footnoteReferenceId = null,
         latexExpression = null,
         latexDisplay = false;
@@ -268,6 +288,7 @@ class _InlineToken {
   })  : text = '',
         style = const _InlineStyle(),
         linkUrl = null,
+        isLinkCandidate = false,
         altText = '',
         imageUrl = null,
         latexExpression = null,
@@ -281,6 +302,7 @@ class _InlineToken {
   })  : text = '',
         style = const _InlineStyle(),
         linkUrl = null,
+        isLinkCandidate = false,
         altText = '',
         imageUrl = null,
         footnoteReferenceId = null;
@@ -288,6 +310,15 @@ class _InlineToken {
   final String text;
   final _InlineStyle style;
   final String? linkUrl;
+
+  /// The closed label of a link whose destination has not arrived yet.
+  ///
+  /// It is painted as text — there is nothing to open — but laid out the way
+  /// the link it is about to become will be: as one piece the line breaker
+  /// does not split. A link run is one widget for its tap target (#14), so a
+  /// label painted as ordinary breakable text would sit across a line end
+  /// while streaming and jump to the next line the moment its `)` arrived.
+  final bool isLinkCandidate;
   final String altText;
   final String? imageUrl;
   final String? footnoteReferenceId;
@@ -321,16 +352,31 @@ class _InlineToken {
   bool get isFootnoteReference => footnoteReferenceId != null;
   bool get isLatex => latexExpression != null;
 
-  _InlineToken withLink(String url, {required String sourceMarkdown}) {
-    if (isImage || isFootnoteReference || isLatex) {
+  /// This token as part of a closed label whose destination is still
+  /// arriving.
+  _InlineToken asLinkCandidate() =>
+      _asLinkText(sourceMarkdown: sourceMarkdown, isLinkCandidate: true);
+
+  _InlineToken withLink(String url, {required String sourceMarkdown}) =>
+      _asLinkText(linkUrl: url, sourceMarkdown: sourceMarkdown);
+
+  // One rebuild for both, so a candidate cannot drift from the link it
+  // becomes: anything a text token carries is carried by both or neither.
+  _InlineToken _asLinkText({
+    String? linkUrl,
+    required String sourceMarkdown,
+    bool isLinkCandidate = false,
+  }) {
+    if (!isVerbatimSlice) {
       return this;
     }
     return _InlineToken.text(
       text: text,
       style: style,
-      linkUrl: url,
+      linkUrl: linkUrl,
       sourceMarkdown: sourceMarkdown,
       visibleSourceStart: visibleSourceStart,
+      isLinkCandidate: isLinkCandidate,
     );
   }
 }

@@ -18,7 +18,8 @@ final class _InlineParseResult {
   /// destination had not arrived yet; `null` when the whole text was consumed.
   final int? withheldFrom;
 
-  /// Code-unit ranges the scan recognised as raw HTML and did not draw.
+  /// Code-unit ranges the scan recognised and did not draw: raw HTML, and the
+  /// syntax around a link label painted before its destination arrived.
   final List<(int start, int end)> hiddenRanges;
 
   /// The part of [text] these tokens came from.
@@ -101,6 +102,11 @@ final class _InlineParser {
 
   final List<(int, int)> _hiddenRanges = <(int, int)>[];
   int? _withheldFrom;
+
+  /// How many labels of still-arriving links enclose the text being parsed.
+  /// Such a label is painted before its link is complete, over the open tail
+  /// of the stream (see the depth limit in `_parseInlineTokens`).
+  int _openLabelDepth = 0;
 
   /// Scan [text] and report both halves of the outcome.
   _InlineParseResult scan(String text,

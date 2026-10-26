@@ -1,6 +1,14 @@
 part of '../view.dart';
 
 extension _StreamingMarkdownInlineParsing on _InlineParser {
+  /// A link label, parsed the one way both the matched branch and the
+  /// still-arriving branch must parse it: a label painted early has to come
+  /// out as the same tokens the finished link will have.
+  List<_InlineToken> _parseLinkLabel(
+          String label, _InlineStyle style, int depth, int labelStart) =>
+      _parseInlineTokens(label,
+          style: style, depth: depth + 1, offset: labelStart);
+
   /// [offset] is where [text] starts inside the text handed to [scan], so a
   /// nested scan reports its findings in the caller's coordinates rather than
   /// its own.
@@ -14,6 +22,15 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
       return <_InlineToken>[];
     }
     if (depth > 8) {
+      // Nothing past the limit is tokenised, so nothing past it is screened:
+      // no raw-HTML suppression, no destination withholding. Inside the label
+      // of a link still arriving — painted early, and running to the end of
+      // the text until its `]` arrives — it is held back instead, as the whole
+      // candidate was before labels were painted early.
+      if (_openLabelDepth > 0) {
+        _withholdAt(offset);
+        return <_InlineToken>[];
+      }
       return <_InlineToken>[
         _InlineToken.text(
             text: text,
@@ -104,24 +121,52 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
         );
         if (scan.kind == _InlineLinkScanKind.incompleteDestination &&
             withholdIncompleteDestinations) {
-          _withholdAt(offset + i);
-          // Stop here rather than falling through to the plain-text path. That
+          // Stop rather than falling through to the plain-text path. That
           // fall-through is what paints a destination still in flight: the
           // source is written out verbatim, URL included. Everything already
           // tokenised stays; only the unresolved tail is held back, and the
           // next chunk re-tokenises from the same source.
           flushPlain();
+          final int? labelEnd = scan.labelEnd;
+          if (labelEnd == null) {
+            _withholdAt(offset + i);
+            return tokens;
+          }
+          // The label is painted now, split exactly as the matched branch
+          // below will split it, so the link it becomes keeps the same tokens
+          // (and therefore the same reveal state) instead of replacing them.
+          // The opening `[` paints nothing; reporting it as hidden is what
+          // keeps it out of anything rebuilt from the source (a selection, the
+          // empty-token fallback) — the matched branch never needs that, its
+          // tokens carry their own source.
+          //
+          // Only a closed label takes the link's unbreakable shape: before
+          // its `]` there is no sign yet that it is a link at all, and a stray
+          // `[` would otherwise turn the rest of the paragraph into one box.
+          _hiddenRanges.add((offset + i, offset + i + 1));
+          final bool labelClosed = labelEnd < text.length;
+          _openLabelDepth++;
+          try {
+            for (final _InlineToken token in _parseLinkLabel(
+                text.substring(i + 1, labelEnd),
+                style,
+                depth,
+                offset + i + 1)) {
+              tokens.add(labelClosed ? token.asLinkCandidate() : token);
+            }
+          } finally {
+            _openLabelDepth--;
+          }
+          // First-wins: a candidate inside the label has already claimed an
+          // earlier boundary, and that one stands.
+          _withholdAt(offset + labelEnd);
           return tokens;
         }
         final _InlineLinkMatch? link = scan.match;
         if (link != null) {
           flushPlain();
-          final List<_InlineToken> labelTokens = _parseInlineTokens(
-            link.label,
-            style: style,
-            depth: depth + 1,
-            offset: offset + i + 1,
-          );
+          final List<_InlineToken> labelTokens =
+              _parseLinkLabel(link.label, style, depth, offset + i + 1);
           if (labelTokens.isEmpty && _hiddenRanges.isEmpty) {
             tokens.add(
               _InlineToken.text(

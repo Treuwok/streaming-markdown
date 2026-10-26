@@ -328,7 +328,12 @@ class StreamingMarkdownRenderView extends StatelessWidget {
   /// of the same choice.
   ///
   /// When on, tokenising stops at the unresolved construct and resumes from
-  /// the same source on the next frame; nothing before it is affected.
+  /// the same source on the next frame; nothing before it is affected. A
+  /// link's label is not part of what is held back — it is the author's text
+  /// and is painted as it arrives; once its `]` is in, it is laid out as the
+  /// link it will become. Only what follows the label waits. Once
+  /// [sourceComplete] is set, a destination that never closed is held back
+  /// from the `[` as before, label included.
   final bool withholdIncompleteDestinations;
 
   /// Never draw raw HTML; report where it was instead.

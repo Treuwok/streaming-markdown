@@ -24,6 +24,7 @@ extension _StreamingMarkdownInlineTokenSpans on StreamingMarkdownRenderView {
     _MarkdownSelectionRange? sourceSelectionRange,
     Color? sourceSelectionColor,
     VoidCallback? onTap,
+    bool keepWhole = false,
   }) {
     // Two things need one widget **per token**, and they are independent of
     // each other: the reveal animation (a token can only fade in on its own if
@@ -42,12 +43,17 @@ extension _StreamingMarkdownInlineTokenSpans on StreamingMarkdownRenderView {
     // space between spans — which, for scripts that do not separate words with
     // spaces, means all of them. That cost is why the path is the default and
     // the two reasons above are the exceptions.
+    //
+    // [keepWhole] is the third: the label of a link whose destination is still
+    // arriving. It has no tap yet, but it takes the shape it will have once it
+    // does — otherwise it wraps across a line end while streaming and jumps to
+    // the next line the moment it becomes a link.
     final bool preserveStaticTokenLayout =
         !animatePerWord && fadeDuration > Duration.zero;
     final bool splitPerToken =
         animatePerWord || preserveStaticTokenLayout || debugTokenHighlight;
 
-    if (!splitPerToken && onTap == null) {
+    if (!splitPerToken && onTap == null && !keepWhole) {
       spans.addAll(
         _sourceHighlightedTextSpans(
           text,
@@ -81,7 +87,9 @@ extension _StreamingMarkdownInlineTokenSpans on StreamingMarkdownRenderView {
         WidgetSpan(
           alignment: PlaceholderAlignment.baseline,
           baseline: TextBaseline.alphabetic,
-          child: GestureDetector(onTap: onTap, child: textWidget),
+          child: onTap == null
+              ? textWidget
+              : GestureDetector(onTap: onTap, child: textWidget),
         ),
       );
       return startTokenIndex + _inlineWordCount(text);
