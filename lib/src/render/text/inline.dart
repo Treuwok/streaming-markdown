@@ -22,6 +22,15 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
       return <_InlineToken>[];
     }
     if (depth > 8) {
+      // Nothing past the limit is tokenised, so nothing past it is screened:
+      // no raw-HTML suppression, no destination withholding. Inside the label
+      // of a link still arriving — painted early, and running to the end of
+      // the text until its `]` arrives — it is held back instead, as the whole
+      // candidate was before labels were painted early.
+      if (_openLabelDepth > 0) {
+        _withholdAt(offset);
+        return <_InlineToken>[];
+      }
       return <_InlineToken>[
         _InlineToken.text(
             text: text,
@@ -136,9 +145,17 @@ extension _StreamingMarkdownInlineParsing on _InlineParser {
           // `[` would otherwise turn the rest of the paragraph into one box.
           _hiddenRanges.add((offset + i, offset + i + 1));
           final bool labelClosed = labelEnd < text.length;
-          for (final _InlineToken token in _parseLinkLabel(
-              text.substring(i + 1, labelEnd), style, depth, offset + i + 1)) {
-            tokens.add(labelClosed ? token.asLinkCandidate() : token);
+          _openLabelDepth++;
+          try {
+            for (final _InlineToken token in _parseLinkLabel(
+                text.substring(i + 1, labelEnd),
+                style,
+                depth,
+                offset + i + 1)) {
+              tokens.add(labelClosed ? token.asLinkCandidate() : token);
+            }
+          } finally {
+            _openLabelDepth--;
           }
           // First-wins: a candidate inside the label has already claimed an
           // earlier boundary, and that one stands.

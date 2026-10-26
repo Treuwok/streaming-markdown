@@ -103,6 +103,11 @@ final class _InlineParser {
   final List<(int, int)> _hiddenRanges = <(int, int)>[];
   int? _withheldFrom;
 
+  /// How many labels of still-arriving links enclose the text being parsed.
+  /// Such a label is painted before its link is complete, over the open tail
+  /// of the stream (see the depth limit in `_parseInlineTokens`).
+  int _openLabelDepth = 0;
+
   /// Scan [text] and report both halves of the outcome.
   _InlineParseResult scan(String text,
       {_InlineStyle style = const _InlineStyle()}) {

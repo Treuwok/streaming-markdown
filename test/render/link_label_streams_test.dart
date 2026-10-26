@@ -36,7 +36,8 @@ void main() {
     ];
 
     for (final (String source, String destination) in links) {
-      test('only grows apart from brackets, never shows the destination: '
+      test(
+          'only grows apart from brackets, never shows the destination: '
           '$source', () {
         // Brackets may come and go: a chunk that ends right on a `]` cannot
         // know yet whether a `(` follows, and the end of the text a scan is
@@ -44,9 +45,9 @@ void main() {
         // so it is read as prose until the `(` arrives. Everything else only
         // ever grows — the label in particular is never taken back.
         String words(String s) => s.replaceAll(RegExp(r'[\[\]]'), '');
-        final String settled = analyzeWithheldMarkdownRegionsOfSource(source,
-                sourceComplete: true)
-            .visibleText;
+        final String settled =
+            analyzeWithheldMarkdownRegionsOfSource(source, sourceComplete: true)
+                .visibleText;
         for (int n = 1; n <= source.length; n++) {
           final String prefix = source.substring(0, n);
           final String visible = _streamed(prefix).visibleText;
@@ -144,6 +145,19 @@ void main() {
       const String source = 'See [a `]` b](https://ex.com/p';
       expect(_streamed(source).safeEndCodeUnits, source.indexOf('['));
     });
+  });
+
+  test('a pending label nested past the depth limit is held back', () {
+    // Each pending label is parsed one level deeper, and so is markup inside
+    // one. Past the limit nothing is tokenised, so nothing is screened.
+    for (final String source in <String>[
+      '${'[' * 9}<a href="https://secret.example',
+      '${'[' * 10}x](https://secret.example',
+      '${'[' * 8}**<a href="https://secret.example**',
+    ]) {
+      expect(_streamed(source).visibleText, isNot(contains('secret')),
+          reason: source);
+    }
   });
 
   test('a candidate inside a label keeps the earlier boundary', () {
